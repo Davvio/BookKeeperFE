@@ -1,0 +1,10 @@
+:root {
+  --bg-primary: #12172a; /* Main background */
+  --bg-secondary: #1d2238; /* Card backgrounds */
+  --bg-tertiary: #252b42; /* Hover/table row alt */
+
+  --text-primary: #f1f4ff; /* Main text */
+  --text-muted: #8a92b2; /* Muted labels */
+
+  --accent: #5c6ac4; /* Sidebar highlight / badge bg */
+}
