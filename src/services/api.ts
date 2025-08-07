@@ -1,10 +1,16 @@
-// src/services/apis.ts
+// src/services/api.ts
 import axios, { type AxiosInstance } from 'axios'
 import { defineStore } from 'pinia'
 
+const baseURL =
+  import.meta.env.VITE_API_BASE_URL ||
+  (window.location.hostname === 'localhost'
+    ? 'http://localhost:8000'
+    : 'https://bookkeeperbe.onrender.com')
+
 export const api: AxiosInstance = axios.create({
-  baseURL: 'http://localhost:8000', // FastAPI port
-  // If you ever need cookies: withCredentials: true,
+  baseURL,
+  // withCredentials: true, // enable if you ever need cookies
 })
 
 export function setAuth(token: string | null) {
@@ -21,7 +27,6 @@ export const useAuth = defineStore('auth', {
     async login(username: string, password: string) {
       const { data } = await api.post('/auth/login', { username, password })
       this.token = data.access_token
-
       api.defaults.headers.common.Authorization = `Bearer ${this.token}`
     },
 
