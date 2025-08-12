@@ -8,19 +8,24 @@ const router = useRouter()
 const auth = useAuth()
 if (!auth.token) auth.init()
 
-const baseNav = [
+type NavItem = { to: string; label: string }
+
+const baseNav: NavItem[] = [
   { to: '/', label: 'Dashboard' },
   { to: '/trades', label: 'All Trades' },
   { to: '/create-trade', label: 'Create Trade' },
+  // { to: '/admin/rbac', label: 'RBAC Graph' }, // deferred
 ]
 
-const adminNav = [{ to: '/admin', label: 'Admin Area' }]
-const guildNav = [{ to: '/guild', label: 'Guild Master' }]
+const adminNav: NavItem[] = [{ to: '/admin', label: 'Admin Area' }]
+const guildNav: NavItem[] = [{ to: '/guild', label: 'Guild Master' }]
 
-const nav = computed(() => {
+const nav = computed<NavItem[]>(() => {
   const items = baseNav.slice()
-  if (auth.role === 'ADMIN') items.push(...adminNav)
-  if (auth.role === 'GUILDMASTER') items.push(...guildNav)
+  // Show admin area if the user has the admin permission
+  if (auth.can('users.admin')) items.push(...adminNav)
+  // Show guild page for guildmasters or users managing locations
+  if (auth.hasRole('GUILDMASTER') || auth.can('locations.manage')) items.push(...guildNav)
   return items
 })
 
@@ -29,14 +34,15 @@ function isActive(path: string) {
 }
 
 function logout() {
-  auth.logout()
-  router.push('/login')
+  auth.logout(router)
 }
 </script>
 
 <template>
-  <aside class="w-60 h-screen bg-[--bg-secondary] flex flex-col py-6 px-4 text-[--text-muted]">
-    <h1 class="text-xl font-bold text-[--text-primary] mb-6 px-2">BookKeeper</h1>
+  <aside
+    class="w-60 h-screen bg-[var(--bg-secondary)] flex flex-col py-6 px-4 text-[var(--text-muted)]"
+  >
+    <h1 class="text-xl font-bold text-[var(--text-primary)] mb-6 px-2">BookKeeper</h1>
 
     <!-- Navigation -->
     <nav class="flex flex-col gap-2">
@@ -47,8 +53,8 @@ function logout() {
         class="flex items-center gap-2 px-3 py-2 rounded-lg transition-all duration-150"
         :class="[
           isActive(item.to)
-            ? 'bg-[--accent] text-white font-semibold'
-            : 'hover:bg-[--bg-tertiary] hover:text-[--text-primary]',
+            ? 'bg-[var(--accent)] text-white font-semibold'
+            : 'hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]',
         ]"
       >
         <span>{{ item.label }}</span>
@@ -56,13 +62,20 @@ function logout() {
     </nav>
 
     <!-- Footer -->
-    <div class="mt-auto px-3 pt-6 border-t border-[--bg-tertiary] text-sm flex flex-col gap-2">
+    <div class="mt-auto px-3 pt-6 border-t border-[var(--bg-tertiary)] text-sm flex flex-col gap-2">
       <div>
-        <div class="text-[--text-primary] font-medium">
-          {{ auth.user?.username || 'User' }}
+        <div class="text-[var(--text-primary)] font-medium">
+          {{ auth.username || 'User' }}
         </div>
-        <div class="text-xs capitalize">
-          {{ (auth.role || 'employee').toLowerCase() }}
+
+        <!-- Role chips -->
+        <div class="mt-1 flex flex-wrap gap-1">
+          <span v-for="code in auth.role_codes" :key="code" class="role-chip" :title="code">
+            {{ code }}
+          </span>
+          <span v-if="auth.role_codes.length === 0" class="text-xs capitalize">
+            {{ (auth.primaryRole || 'EMPLOYEE').toLowerCase() }}
+          </span>
         </div>
       </div>
 
@@ -76,3 +89,14 @@ function logout() {
     </div>
   </aside>
 </template>
+
+<style scoped>
+.role-chip {
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--bg-tertiary);
+}
+</style>

@@ -36,3 +36,8 @@ export const useAuth = defineStore('auth', {
     },
   },
 })
+
+export async function fetchRBACGraph() {
+  const { data } = await axios.get('/rbac/graph')
+  return data
+}

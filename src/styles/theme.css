@@ -1,10 +1,19 @@
 :root {
-  --bg-primary: #12172a; /* Main background */
-  --bg-secondary: #1d2238; /* Card backgrounds */
-  --bg-tertiary: #252b42; /* Hover/table row alt */
+  /* your existing palette */
+  --bg-primary: #12172a;
+  --bg-secondary: #1d2238;
+  --bg-tertiary: #252b42;
 
-  --text-primary: #f1f4ff; /* Main text */
-  --text-muted: #8a92b2; /* Muted labels */
+  --text-primary: #ffffff;
+  --text-muted: #aaadb9;
+  --accent: #5c6ac4;
 
-  --accent: #5c6ac4; /* Sidebar highlight / badge bg */
+  /* small additions */
+  --text-secondary: var(--text-muted);
+  --border-subtle: rgba(255, 255, 255, 0.12);
+  --panel-shadow: 0 12px 24px rgba(0, 0, 0, 0.35);
+  --accent-tint: rgba(92, 106, 196, 0.18);
+
+  /* make built-in controls prefer dark theming */
+  color-scheme: dark;
 }

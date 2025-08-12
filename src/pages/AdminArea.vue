@@ -1,151 +1,453 @@
+<!-- eslint-disable @typescript-eslint/no-unused-vars -->
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { api } from '@/services/api'
+import { ref, onMounted, computed } from 'vue'
+import { AxiosError } from 'axios'
+import { listUsers, createUser, replaceUserRoles, type UserOut } from '@/services/usersApi'
+import { listRoles, type Role } from '@/services/rolesApi'
 import { useAuth } from '@/stores/auth'
 
-type UserRow = { id: number; username: string; role: string }
+const auth = useAuth() // route already gated, but good to have
 
-const auth = useAuth()
+// Data
 const loading = ref(false)
-const error = ref<string | null>(null)
-const ok = ref<string | null>(null)
-const users = ref<UserRow[]>([])
+const savingCreate = ref(false)
+const savingEdit = ref<Record<number, boolean>>({})
+const errorMsg = ref('')
+const successMsg = ref('')
 
-const form = ref({
-  username: '',
-  password: '',
-  role: 'EMPLOYEE',
+// Lists
+const users = ref<UserOut[]>([])
+const roles = ref<Role[]>([])
+
+// Create form
+const newUsername = ref('')
+const newPassword = ref('')
+const newRoleIds = ref<number[]>([])
+
+// Inline edit state
+const editingUserId = ref<number | null>(null)
+const editRoleIds = ref<number[]>([])
+
+// Search
+const q = ref('')
+
+// Derived
+const roleMap = computed(() => {
+  const m: Record<number, Role> = {}
+  for (let i = 0; i < roles.value.length; i++) {
+    const r = roles.value[i]
+    m[r.id] = r
+  }
+  return m
 })
 
-async function loadUsers() {
+const filteredUsers = computed<UserOut[]>(() => {
+  const term = q.value.trim().toLowerCase()
+  if (term === '') return users.value
+  const out: UserOut[] = []
+  for (let i = 0; i < users.value.length; i++) {
+    const u = users.value[i]
+    const nameHit = u.username.toLowerCase().indexOf(term) !== -1
+    let roleHit = false
+    if (!nameHit) {
+      for (let j = 0; j < u.role_names.length; j++) {
+        if (u.role_names[j].toLowerCase().indexOf(term) !== -1) {
+          roleHit = true
+          break
+        }
+      }
+      if (!roleHit) {
+        for (let j = 0; j < u.role_codes.length; j++) {
+          if (u.role_codes[j].toLowerCase().indexOf(term) !== -1) {
+            roleHit = true
+            break
+          }
+        }
+      }
+    }
+    if (nameHit || roleHit) out.push(u)
+  }
+  return out
+})
+
+async function loadAll() {
   loading.value = true
-  error.value = null
+  errorMsg.value = ''
   try {
-    const { data } = await api.get<UserRow[]>('/users')
-    users.value = data
-  } catch {
-    error.value = 'Failed to load users'
+    // roles first so UI can render properly
+    roles.value = await listRoles()
+    users.value = await listUsers()
+  } catch (e: unknown) {
+    const ax = e as AxiosError<{ detail?: string }>
+    errorMsg.value = ax?.response?.data?.detail || 'Failed to load admin data.'
   } finally {
     loading.value = false
   }
 }
 
-async function submit() {
-  ok.value = null
-  error.value = null
+onMounted(loadAll)
+
+function resetCreateForm() {
+  newUsername.value = ''
+  newPassword.value = ''
+  newRoleIds.value = []
+}
+
+async function onCreateUser() {
+  errorMsg.value = ''
+  successMsg.value = ''
+  if (newUsername.value.trim().length < 3) {
+    errorMsg.value = 'Username must be at least 3 characters.'
+    return
+  }
+  if (newPassword.value.length < 6) {
+    errorMsg.value = 'Password must be at least 6 characters.'
+    return
+  }
+  if (newRoleIds.value.length === 0) {
+    errorMsg.value = 'Select at least one role.'
+    return
+  }
+  savingCreate.value = true
   try {
-    await api.post('/users', {
-      username: form.value.username.trim(),
-      password: form.value.password,
-      role: form.value.role,
+    const res = await createUser({
+      username: newUsername.value.trim(),
+      password: newPassword.value,
+      role_ids: newRoleIds.value.slice(),
     })
-    ok.value = 'User created'
-    form.value.username = ''
-    form.value.password = ''
-    form.value.role = 'EMPLOYEE'
-    await loadUsers()
-  } catch {
-    error.value = 'Failed to create user'
+    users.value.unshift(res)
+    successMsg.value = `User '${res.username}' created.`
+    resetCreateForm()
+  } catch (e: unknown) {
+    const ax = e as AxiosError<{ detail?: string }>
+    errorMsg.value = ax?.response?.data?.detail || 'Failed to create user.'
+  } finally {
+    savingCreate.value = false
   }
 }
 
-onMounted(loadUsers)
+function startEdit(u: UserOut) {
+  editingUserId.value = u.id
+  editRoleIds.value = u.role_ids.slice()
+}
+
+function cancelEdit() {
+  editingUserId.value = null
+  editRoleIds.value = []
+}
+
+function isEditing(u: UserOut): boolean {
+  return editingUserId.value === u.id
+}
+
+function toggleRoleInEdit(roleId: number) {
+  const idx = editRoleIds.value.indexOf(roleId)
+  if (idx === -1) editRoleIds.value.push(roleId)
+  else editRoleIds.value.splice(idx, 1)
+}
+
+async function saveEdit(u: UserOut) {
+  const uid = u.id
+  if (!savingEdit.value[uid]) savingEdit.value[uid] = false
+  savingEdit.value[uid] = true
+  errorMsg.value = ''
+  successMsg.value = ''
+  try {
+    const updated = await replaceUserRoles(uid, editRoleIds.value.slice())
+    // update in place
+    for (let i = 0; i < users.value.length; i++) {
+      if (users.value[i].id === uid) {
+        users.value[i] = updated
+        break
+      }
+    }
+    successMsg.value = `Roles updated for '${updated.username}'.`
+    cancelEdit()
+  } catch (e: unknown) {
+    const ax = e as AxiosError<{ detail?: string }>
+    errorMsg.value = ax?.response?.data?.detail || 'Failed to update roles.'
+  } finally {
+    savingEdit.value[uid] = false
+  }
+}
+
+function roleNameById(id: number): string {
+  const r = roleMap.value[id]
+  return r ? r.name : '#' + String(id)
+}
 </script>
 
 <template>
-  <div class="p-6 grid gap-3 md:grid-cols-3">
-    <router-link
-      to="/admin/items"
-      class="p-4 border rounded bg-[--bg-secondary] hover:bg-[--bg-tertiary]"
-      >Items Catalog</router-link
-    >
-    <router-link
-      to="/admin/currency"
-      class="p-4 border rounded bg-[--bg-secondary] hover:bg-[--bg-tertiary]"
-      >Structure Currency</router-link
-    >
-    <router-link
-      to="/admin/valuations"
-      class="p-4 border rounded bg-[--bg-secondary] hover:bg-[--bg-tertiary]"
-      >Item Valuations</router-link
-    >
-  </div>
-  <div class="p-6 space-y-6">
-    <h2 class="text-2xl font-bold text-[--text-primary]">Admin Area</h2>
-    <p class="text-[--text-muted]">
-      Structure: <b>{{ auth.structureId ?? 'unknown' }}</b> — Role: <b>{{ auth.role }}</b>
-    </p>
+  <div class="p-4">
+    <h2 class="text-xl mb-4">Admin Area</h2>
 
-    <!-- Create user form -->
-    <div
-      class="p-4 rounded-lg border border-[--bg-tertiary] bg-[--bg-secondary] max-w-xl space-y-3"
-    >
-      <h3 class="font-semibold">Create User (same structure)</h3>
+    <div v-if="loading">Loading…</div>
+    <div v-else>
+      <!-- Alerts -->
+      <div v-if="errorMsg" class="alert err">{{ errorMsg }}</div>
+      <div v-if="successMsg" class="alert ok">{{ successMsg }}</div>
 
-      <div class="flex flex-col gap-2">
-        <label class="text-sm">Username</label>
-        <input
-          v-model="form.username"
-          class="border px-3 py-2 rounded"
-          placeholder="new username"
-        />
+      <!-- Create user -->
+      <div class="card mb-4">
+        <h3 class="text-lg mb-2">Create User</h3>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div>
+            <label class="label">Username</label>
+            <input class="input" v-model.trim="newUsername" placeholder="username" />
+          </div>
+          <div>
+            <label class="label">Password</label>
+            <input type="password" class="input" v-model="newPassword" placeholder="password" />
+          </div>
+          <div>
+            <label class="label">Roles</label>
+            <div class="roles-box">
+              <label v-for="r in roles" :key="'create-' + r.id" class="role-check" :title="r.code">
+                <input
+                  type="checkbox"
+                  :value="r.id"
+                  :checked="newRoleIds.includes(r.id)"
+                  @change="
+                    ($event.target as HTMLInputElement).checked
+                      ? newRoleIds.push(r.id)
+                      : newRoleIds.splice(newRoleIds.indexOf(r.id), 1)
+                  "
+                />
+                <span>{{ r.name }}</span>
+                <small class="code">{{ r.code }}</small>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-3">
+          <button class="btn primary" :disabled="savingCreate" @click="onCreateUser">Create</button>
+          <span v-if="savingCreate" class="ml-2">Saving…</span>
+        </div>
       </div>
 
-      <div class="flex flex-col gap-2">
-        <label class="text-sm">Password</label>
-        <input
-          v-model="form.password"
-          type="password"
-          class="border px-3 py-2 rounded"
-          placeholder="password"
-        />
-      </div>
+      <!-- Users list -->
+      <div class="card">
+        <div class="toolbar">
+          <input class="input" placeholder="Search users or roles…" v-model="q" />
+        </div>
 
-      <div class="flex flex-col gap-2">
-        <label class="text-sm">Role</label>
-        <select v-model="form.role" class="border px-3 py-2 rounded">
-          <option value="EMPLOYEE">EMPLOYEE</option>
-          <option value="ADMIN">ADMIN</option>
-          <option value="GUILDMASTER">GUILDMASTER</option>
-        </select>
-      </div>
+        <div class="thead">
+          <div>Username</div>
+          <div>Roles</div>
+          <div class="text-right">Actions</div>
+        </div>
 
-      <div class="flex gap-2">
-        <button @click="submit" class="px-4 py-2 rounded border hover:bg-gray-50">Create</button>
-        <button @click="loadUsers" class="px-4 py-2 rounded border hover:bg-gray-50">
-          Refresh
-        </button>
-      </div>
+        <div v-if="filteredUsers.length === 0" class="empty-row">No users.</div>
 
-      <div v-if="ok" class="text-green-600 text-sm">{{ ok }}</div>
-      <div v-if="error" class="text-red-600 text-sm">{{ error }}</div>
-    </div>
+        <div v-for="u in filteredUsers" :key="u.id" class="trow">
+          <div class="username">{{ u.username }}</div>
 
-    <!-- Users table -->
-    <div>
-      <h3 class="font-semibold mb-2">Users in your structure</h3>
-      <div v-if="loading">Loading…</div>
-      <div v-else>
-        <table class="w-full border-collapse text-sm">
-          <thead>
-            <tr class="bg-gray-50">
-              <th class="border px-2 py-2 text-left">ID</th>
-              <th class="border px-2 py-2 text-left">Username</th>
-              <th class="border px-2 py-2 text-left">Role</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="u in users" :key="u.id" class="hover:bg-gray-50">
-              <td class="border px-2 py-2">{{ u.id }}</td>
-              <td class="border px-2 py-2">{{ u.username }}</td>
-              <td class="border px-2 py-2">{{ u.role }}</td>
-            </tr>
-            <tr v-if="users.length === 0">
-              <td colspan="3" class="border px-2 py-6 text-center opacity-70">No users yet</td>
-            </tr>
-          </tbody>
-        </table>
+          <!-- roles display / edit -->
+          <div>
+            <!-- display -->
+            <div v-if="!isEditing(u)" class="chips">
+              <span v-for="(name, idx) in u.role_names" :key="u.id + '-r-' + idx" class="chip">
+                {{ name }}
+              </span>
+            </div>
+
+            <!-- edit -->
+            <div v-else class="roles-box">
+              <label
+                v-for="r in roles"
+                :key="'edit-' + u.id + '-' + r.id"
+                class="role-check"
+                :class="{ dim: r.is_system && auth.username !== 'admin' }"
+                :title="r.code"
+              >
+                <input
+                  type="checkbox"
+                  :value="r.id"
+                  :checked="editRoleIds.includes(r.id)"
+                  @change="toggleRoleInEdit(r.id)"
+                />
+                <span>{{ r.name }}</span>
+                <small class="code">{{ r.code }}</small>
+              </label>
+            </div>
+          </div>
+
+          <div class="text-right actions">
+            <template v-if="!isEditing(u)">
+              <button class="btn" @click="startEdit(u)">Edit roles</button>
+            </template>
+            <template v-else>
+              <button
+                class="btn primary"
+                :disabled="savingEdit[u.id] === true"
+                @click="saveEdit(u)"
+              >
+                Save
+              </button>
+              <button class="btn" @click="cancelEdit">Cancel</button>
+            </template>
+          </div>
+        </div>
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+.text-xl {
+  font-size: 1.25rem;
+}
+.text-lg {
+  font-size: 1.1rem;
+}
+.mb-4 {
+  margin-bottom: 16px;
+}
+.mt-3 {
+  margin-top: 12px;
+}
+.ml-2 {
+  margin-left: 8px;
+}
+
+.card {
+  background: var(--bg-secondary);
+  padding: 12px;
+  border-radius: 12px;
+}
+.input {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--bg-tertiary);
+  border-radius: 8px;
+}
+.btn {
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--bg-tertiary);
+  cursor: pointer;
+}
+.btn.primary {
+  background: var(--accent);
+  color: var(--bg-primary);
+}
+.alert {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+.alert.ok {
+  background: #203a2f;
+  color: #9ee0bf;
+}
+.alert.err {
+  background: #3a2222;
+  color: #ffb4b4;
+}
+
+.grid {
+  display: grid;
+}
+.grid-cols-1 {
+  grid-template-columns: 1fr;
+}
+.md\:grid-cols-3 {
+  grid-template-columns: 1fr;
+}
+@media (min-width: 768px) {
+  .md\:grid-cols-3 {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+}
+.gap-3 {
+  gap: 12px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.thead,
+.trow {
+  display: grid;
+  grid-template-columns: 1fr 2fr 0.7fr;
+  gap: 8px;
+  align-items: start;
+}
+.thead {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+.trow {
+  background: var(--bg-secondary);
+  border: 1px solid var(--bg-tertiary);
+  border-radius: 10px;
+  padding: 10px;
+}
+.empty-row {
+  padding: 12px;
+  text-align: center;
+  color: var(--text-secondary);
+  border: 1px dashed var(--bg-tertiary);
+  border-radius: 10px;
+}
+
+.username {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.chip {
+  font-size: 0.8rem;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--bg-tertiary);
+}
+
+.roles-box {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  background: var(--bg-tertiary);
+  border: 1px solid var(--bg-tertiary);
+  border-radius: 8px;
+  padding: 8px;
+}
+.role-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--bg-tertiary);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+.role-check .code {
+  opacity: 0.7;
+  margin-left: auto;
+}
+.role-check.dim {
+  opacity: 0.8;
+}
+.actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+</style>
