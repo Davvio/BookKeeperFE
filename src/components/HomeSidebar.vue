@@ -18,7 +18,10 @@ const baseNav: NavItem[] = [
 ]
 
 const adminNav: NavItem[] = [{ to: '/admin', label: 'Admin Area' }]
-const guildNav: NavItem[] = [{ to: '/guild', label: 'Guild Master' }]
+const guildNav: NavItem[] = [
+  { to: '/guild', label: 'Guild Master' },
+  { to: '/inventory', label: 'Inventory' },
+]
 
 const nav = computed<NavItem[]>(() => {
   const items = baseNav.slice()

@@ -46,6 +46,12 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true, needPerm: 'users.admin' },
       },
 
+      {
+        path: 'inventory',
+        component: () => import('@/pages/Inventory.vue'),
+        meta: { requiresAuth: true },
+      },
+
       // Optional page
       {
         path: 'guild',

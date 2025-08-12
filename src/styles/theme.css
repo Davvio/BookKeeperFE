@@ -9,7 +9,7 @@
   --accent: #5c6ac4;
 
   /* small additions */
-  --text-secondary: var(--text-muted);
+  --text-secondary: #8d9ee0;
   --border-subtle: rgba(255, 255, 255, 0.12);
   --panel-shadow: 0 12px 24px rgba(0, 0, 0, 0.35);
   --accent-tint: rgba(92, 106, 196, 0.18);
