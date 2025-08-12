@@ -6,7 +6,7 @@ const auth = useAuth()
 <template>
   <div class="p-6 space-y-3">
     <h2 class="text-2xl font-bold text-[--text-primary]">Guild Master</h2>
-    <p class="text-[--text-muted]">Greetings {{ auth.user?.username }} (role: {{ auth.role }}).</p>
+    <p class="text-[--text-muted]">Greetings {{ auth.username }} as the Guild Master!</p>
 
     <div class="grid gap-3">
       <div class="p-4 rounded-lg border border-[--bg-tertiary] bg-[--bg-secondary]">
