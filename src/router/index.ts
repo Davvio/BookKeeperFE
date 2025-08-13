@@ -26,24 +26,32 @@ const routes: RouteRecordRaw[] = [
 
       // Catalogs & Admin
       {
-        path: 'items',
-        component: () => import('@/pages/ItemsCatalog.vue'),
+        path: '/admin',
+        component: () => import('@/pages/AdminArea.vue'), // the layout with sidebar
         meta: { requiresAuth: true },
-      }, // list is open to any logged user; buttons gated in-page
-      {
-        path: 'valuations',
-        component: () => import('@/pages/ItemValuations.vue'),
-        meta: { requiresAuth: true, needPerm: 'valuations.manage' },
-      },
-      {
-        path: 'structure-currency',
-        component: () => import('@/pages/StructureValuta.vue'),
-        meta: { requiresAuth: true, needPerm: 'users.admin' },
-      },
-      {
-        path: 'admin',
-        component: () => import('@/pages/AdminArea.vue'),
-        meta: { requiresAuth: true, needPerm: 'users.admin' },
+        children: [
+          {
+            path: '',
+            component: () => import('@/pages/AdminUsersRoles.vue'),
+            meta: { requiresAuth: true },
+          },
+          {
+            path: 'items',
+            component: () => import('@/pages/ItemsCatalog.vue'),
+            meta: { requiresAuth: true },
+          },
+          {
+            path: 'valuations',
+            component: () => import('@/pages/ItemValuations.vue'),
+            meta: { requiresAuth: true },
+          },
+          {
+            path: 'structure-currency',
+            component: () => import('@/pages/StructureValuta.vue'),
+            meta: { requiresAuth: true },
+          },
+          // { path: 'rbac-graph', component: () => import('@/pages/AdminRbacGraph.vue'), meta: { requiresAuth: true } },
+        ],
       },
 
       {

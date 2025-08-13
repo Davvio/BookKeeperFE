@@ -31,6 +31,16 @@ export type TradeOut = {
   profit: number | null
 }
 
+export async function deleteTradeLine(lineId: number): Promise<{
+  deleted_line_id: number
+  trade_id: number
+  deleted_trade: boolean
+}> {
+  const { data } = await api.delete(`/trades/trade-lines/${lineId}`)
+  return data
+}
+
+
 export async function createTrade(payload: TradeCreate): Promise<TradeOut> {
   const { data } = await api.post<TradeOut>('/trades', payload)
   return data

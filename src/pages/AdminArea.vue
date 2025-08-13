@@ -1,453 +1,133 @@
-<!-- eslint-disable @typescript-eslint/no-unused-vars -->
+<!-- eslint-disable @typescript-eslint/no-explicit-any -->
+<!-- src/pages/AdminArea.vue -->
+<!-- eslint-disable vue/multi-word-component-names -->
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
-import { AxiosError } from 'axios'
-import { listUsers, createUser, replaceUserRoles, type UserOut } from '@/services/usersApi'
-import { listRoles, type Role } from '@/services/rolesApi'
+import { computed, ref } from 'vue'
+import { RouterLink, RouterView } from 'vue-router'
 import { useAuth } from '@/stores/auth'
 
-const auth = useAuth() // route already gated, but good to have
+const auth = useAuth()
+const isAdmin = computed(() =>
+  Boolean(
+    (auth as any)?.permissions?.['users.admin'] ||
+      (auth as any)?.user?.permissions?.['users.admin'],
+  ),
+)
 
-// Data
-const loading = ref(false)
-const savingCreate = ref(false)
-const savingEdit = ref<Record<number, boolean>>({})
-const errorMsg = ref('')
-const successMsg = ref('')
-
-// Lists
-const users = ref<UserOut[]>([])
-const roles = ref<Role[]>([])
-
-// Create form
-const newUsername = ref('')
-const newPassword = ref('')
-const newRoleIds = ref<number[]>([])
-
-// Inline edit state
-const editingUserId = ref<number | null>(null)
-const editRoleIds = ref<number[]>([])
-
-// Search
-const q = ref('')
-
-// Derived
-const roleMap = computed(() => {
-  const m: Record<number, Role> = {}
-  for (let i = 0; i < roles.value.length; i++) {
-    const r = roles.value[i]
-    m[r.id] = r
-  }
-  return m
-})
-
-const filteredUsers = computed<UserOut[]>(() => {
-  const term = q.value.trim().toLowerCase()
-  if (term === '') return users.value
-  const out: UserOut[] = []
-  for (let i = 0; i < users.value.length; i++) {
-    const u = users.value[i]
-    const nameHit = u.username.toLowerCase().indexOf(term) !== -1
-    let roleHit = false
-    if (!nameHit) {
-      for (let j = 0; j < u.role_names.length; j++) {
-        if (u.role_names[j].toLowerCase().indexOf(term) !== -1) {
-          roleHit = true
-          break
-        }
-      }
-      if (!roleHit) {
-        for (let j = 0; j < u.role_codes.length; j++) {
-          if (u.role_codes[j].toLowerCase().indexOf(term) !== -1) {
-            roleHit = true
-            break
-          }
-        }
-      }
-    }
-    if (nameHit || roleHit) out.push(u)
-  }
-  return out
-})
-
-async function loadAll() {
-  loading.value = true
-  errorMsg.value = ''
-  try {
-    // roles first so UI can render properly
-    roles.value = await listRoles()
-    users.value = await listUsers()
-  } catch (e: unknown) {
-    const ax = e as AxiosError<{ detail?: string }>
-    errorMsg.value = ax?.response?.data?.detail || 'Failed to load admin data.'
-  } finally {
-    loading.value = false
-  }
-}
-
-onMounted(loadAll)
-
-function resetCreateForm() {
-  newUsername.value = ''
-  newPassword.value = ''
-  newRoleIds.value = []
-}
-
-async function onCreateUser() {
-  errorMsg.value = ''
-  successMsg.value = ''
-  if (newUsername.value.trim().length < 3) {
-    errorMsg.value = 'Username must be at least 3 characters.'
-    return
-  }
-  if (newPassword.value.length < 6) {
-    errorMsg.value = 'Password must be at least 6 characters.'
-    return
-  }
-  if (newRoleIds.value.length === 0) {
-    errorMsg.value = 'Select at least one role.'
-    return
-  }
-  savingCreate.value = true
-  try {
-    const res = await createUser({
-      username: newUsername.value.trim(),
-      password: newPassword.value,
-      role_ids: newRoleIds.value.slice(),
-    })
-    users.value.unshift(res)
-    successMsg.value = `User '${res.username}' created.`
-    resetCreateForm()
-  } catch (e: unknown) {
-    const ax = e as AxiosError<{ detail?: string }>
-    errorMsg.value = ax?.response?.data?.detail || 'Failed to create user.'
-  } finally {
-    savingCreate.value = false
-  }
-}
-
-function startEdit(u: UserOut) {
-  editingUserId.value = u.id
-  editRoleIds.value = u.role_ids.slice()
-}
-
-function cancelEdit() {
-  editingUserId.value = null
-  editRoleIds.value = []
-}
-
-function isEditing(u: UserOut): boolean {
-  return editingUserId.value === u.id
-}
-
-function toggleRoleInEdit(roleId: number) {
-  const idx = editRoleIds.value.indexOf(roleId)
-  if (idx === -1) editRoleIds.value.push(roleId)
-  else editRoleIds.value.splice(idx, 1)
-}
-
-async function saveEdit(u: UserOut) {
-  const uid = u.id
-  if (!savingEdit.value[uid]) savingEdit.value[uid] = false
-  savingEdit.value[uid] = true
-  errorMsg.value = ''
-  successMsg.value = ''
-  try {
-    const updated = await replaceUserRoles(uid, editRoleIds.value.slice())
-    // update in place
-    for (let i = 0; i < users.value.length; i++) {
-      if (users.value[i].id === uid) {
-        users.value[i] = updated
-        break
-      }
-    }
-    successMsg.value = `Roles updated for '${updated.username}'.`
-    cancelEdit()
-  } catch (e: unknown) {
-    const ax = e as AxiosError<{ detail?: string }>
-    errorMsg.value = ax?.response?.data?.detail || 'Failed to update roles.'
-  } finally {
-    savingEdit.value[uid] = false
-  }
-}
-
-function roleNameById(id: number): string {
-  const r = roleMap.value[id]
-  return r ? r.name : '#' + String(id)
-}
+// Admin nav (only admin pages here)
+type NavItem = { label: string; to: string; icon?: string; adminOnly?: boolean }
+const nav: NavItem[] = [
+  { label: 'Users & Roles',     to: '/admin',                     icon: '👥', adminOnly: true },
+  { label: 'Items Catalog',     to: '/admin/items',               icon: '🧱' },
+  { label: 'Item Valuations',   to: '/admin/valuations',          icon: '💱', adminOnly: true },
+  { label: 'Structure Currency',to: '/admin/structure-currency',  icon: '🏛️', adminOnly: true },
+  // { label: 'RBAC Graph',      to: '/admin/rbac-graph',          icon: '🕸️', adminOnly: true },
+]
+const visibleNav = computed(() => nav.filter(n => !n.adminOnly || isAdmin.value))
+const sidebarOpen = ref(false)
 </script>
 
 <template>
-  <div class="p-4">
-    <h2 class="text-xl mb-4">Admin Area</h2>
+  <div class="admin-shell">
+    <!-- Sidebar -->
+    <aside :class="['admin-sidebar', sidebarOpen && 'open']">
+      <div class="brand"><span class="logo-dot" /> Admin</div>
 
-    <div v-if="loading">Loading…</div>
-    <div v-else>
-      <!-- Alerts -->
-      <div v-if="errorMsg" class="alert err">{{ errorMsg }}</div>
-      <div v-if="successMsg" class="alert ok">{{ successMsg }}</div>
+      <nav class="menu">
+        <RouterLink
+          v-for="item in visibleNav"
+          :key="item.to"
+          :to="item.to"
+          class="nav-link"
+          v-slot="{ isActive }"
+          @click="sidebarOpen = false"
+        >
+          <span class="icon" v-if="item.icon">{{ item.icon }}</span>
+          <span class="text">{{ item.label }}</span>
+          <span class="active-bar" :class="{ show: isActive }" />
+        </RouterLink>
+      </nav>
 
-      <!-- Create user -->
-      <div class="card mb-4">
-        <h3 class="text-lg mb-2">Create User</h3>
-
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div>
-            <label class="label">Username</label>
-            <input class="input" v-model.trim="newUsername" placeholder="username" />
-          </div>
-          <div>
-            <label class="label">Password</label>
-            <input type="password" class="input" v-model="newPassword" placeholder="password" />
-          </div>
-          <div>
-            <label class="label">Roles</label>
-            <div class="roles-box">
-              <label v-for="r in roles" :key="'create-' + r.id" class="role-check" :title="r.code">
-                <input
-                  type="checkbox"
-                  :value="r.id"
-                  :checked="newRoleIds.includes(r.id)"
-                  @change="
-                    ($event.target as HTMLInputElement).checked
-                      ? newRoleIds.push(r.id)
-                      : newRoleIds.splice(newRoleIds.indexOf(r.id), 1)
-                  "
-                />
-                <span>{{ r.name }}</span>
-                <small class="code">{{ r.code }}</small>
-              </label>
-            </div>
-          </div>
-        </div>
-
-        <div class="mt-3">
-          <button class="btn primary" :disabled="savingCreate" @click="onCreateUser">Create</button>
-          <span v-if="savingCreate" class="ml-2">Saving…</span>
-        </div>
+      <div class="foot">
+        <span class="role" v-if="isAdmin">Admin</span>
+        <span class="role" v-else>User</span>
       </div>
+    </aside>
 
-      <!-- Users list -->
-      <div class="card">
-        <div class="toolbar">
-          <input class="input" placeholder="Search users or roles…" v-model="q" />
-        </div>
+    <!-- Main -->
+    <main class="admin-content">
+      <header class="topbar">
+        <button class="burger" @click="sidebarOpen = !sidebarOpen" aria-label="Toggle sidebar">☰</button>
+        <h1 class="title">Admin Area</h1>
+      </header>
 
-        <div class="thead">
-          <div>Username</div>
-          <div>Roles</div>
-          <div class="text-right">Actions</div>
-        </div>
-
-        <div v-if="filteredUsers.length === 0" class="empty-row">No users.</div>
-
-        <div v-for="u in filteredUsers" :key="u.id" class="trow">
-          <div class="username">{{ u.username }}</div>
-
-          <!-- roles display / edit -->
-          <div>
-            <!-- display -->
-            <div v-if="!isEditing(u)" class="chips">
-              <span v-for="(name, idx) in u.role_names" :key="u.id + '-r-' + idx" class="chip">
-                {{ name }}
-              </span>
-            </div>
-
-            <!-- edit -->
-            <div v-else class="roles-box">
-              <label
-                v-for="r in roles"
-                :key="'edit-' + u.id + '-' + r.id"
-                class="role-check"
-                :class="{ dim: r.is_system && auth.username !== 'admin' }"
-                :title="r.code"
-              >
-                <input
-                  type="checkbox"
-                  :value="r.id"
-                  :checked="editRoleIds.includes(r.id)"
-                  @change="toggleRoleInEdit(r.id)"
-                />
-                <span>{{ r.name }}</span>
-                <small class="code">{{ r.code }}</small>
-              </label>
-            </div>
-          </div>
-
-          <div class="text-right actions">
-            <template v-if="!isEditing(u)">
-              <button class="btn" @click="startEdit(u)">Edit roles</button>
-            </template>
-            <template v-else>
-              <button
-                class="btn primary"
-                :disabled="savingEdit[u.id] === true"
-                @click="saveEdit(u)"
-              >
-                Save
-              </button>
-              <button class="btn" @click="cancelEdit">Cancel</button>
-            </template>
-          </div>
-        </div>
-      </div>
-    </div>
+      <section class="page">
+        <!-- Child admin pages render here -->
+        <RouterView />
+      </section>
+    </main>
   </div>
 </template>
 
 <style scoped>
-.text-xl {
-  font-size: 1.25rem;
-}
-.text-lg {
-  font-size: 1.1rem;
-}
-.mb-4 {
-  margin-bottom: 16px;
-}
-.mt-3 {
-  margin-top: 12px;
-}
-.ml-2 {
-  margin-left: 8px;
-}
-
-.card {
-  background: var(--bg-secondary);
-  padding: 12px;
-  border-radius: 12px;
-}
-.input {
-  width: 100%;
-  padding: 8px 10px;
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-  border: 1px solid var(--bg-tertiary);
-  border-radius: 8px;
-}
-.btn {
-  padding: 8px 12px;
-  border-radius: 10px;
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-  border: 1px solid var(--bg-tertiary);
-  cursor: pointer;
-}
-.btn.primary {
-  background: var(--accent);
-  color: var(--bg-primary);
-}
-.alert {
-  margin-bottom: 10px;
-  padding: 8px 10px;
-  border-radius: 8px;
-}
-.alert.ok {
-  background: #203a2f;
-  color: #9ee0bf;
-}
-.alert.err {
-  background: #3a2222;
-  color: #ffb4b4;
-}
-
-.grid {
+.admin-shell {
   display: grid;
+  grid-template-columns: 240px 1fr;
+  min-height: 100vh;
+  background: var(--bg-primary);
+  color: var(--text-primary);
 }
-.grid-cols-1 {
-  grid-template-columns: 1fr;
+/* Sidebar */
+.admin-sidebar {
+  background: var(--bg-secondary);
+  border-right: 1px solid rgba(255,255,255,.08);
+  padding: 14px 12px;
+  position: sticky; top: 0; height: 100vh; overflow-y: auto;
 }
-.md\:grid-cols-3 {
-  grid-template-columns: 1fr;
+.brand { display: flex; align-items: center; gap: 10px; margin: 4px 6px 12px; font-weight: 700; }
+.logo-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px rgba(92,106,196,.25); }
+.menu { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.nav-link {
+  position: relative; display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border-radius: 10px; color: var(--text-primary);
+  text-decoration: none; border: 1px solid transparent;
 }
-@media (min-width: 768px) {
-  .md\:grid-cols-3 {
-    grid-template-columns: 1fr 1fr 1fr;
+.nav-link:hover { background: var(--bg-tertiary); border-color: rgba(255,255,255,.08); }
+.nav-link .icon { width: 22px; text-align: center; opacity: .9; }
+.nav-link .text { flex: 1; }
+.active-bar {
+  position: absolute; left: -12px; top: 8px; bottom: 8px; width: 3px;
+  background: var(--accent); border-radius: 999px; opacity: 0; transform: scaleY(.3);
+  transition: opacity .15s ease, transform .15s ease;
+}
+.active-bar.show { opacity: 1; transform: scaleY(1); }
+.foot { margin-top: auto; padding-top: 14px; color: var(--text-muted); font-size: .9rem; }
+.role { padding: 2px 8px; border-radius: 999px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); }
+
+/* Main */
+.admin-content { display: flex; flex-direction: column; min-width: 0; }
+.topbar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,.08);
+  background: linear-gradient(0deg, rgba(255,255,255,.02), rgba(255,255,255,.02));
+}
+.burger {
+  display: none; padding: 6px 10px; border-radius: 8px;
+  background: var(--bg-tertiary); color: var(--text-primary);
+  border: 1px solid rgba(255,255,255,.12); cursor: pointer;
+}
+.title { font-size: 1.05rem; opacity: .9; }
+.page { padding: 14px; }
+
+/* Responsive */
+@media (max-width: 980px) {
+  .admin-shell { grid-template-columns: 1fr; }
+  .admin-sidebar {
+    position: fixed; inset: 0 auto 0 0; width: 240px; z-index: 30;
+    transform: translateX(-100%); transition: transform .2s ease;
+    box-shadow: 0 10px 30px rgba(0,0,0,.4);
   }
-}
-.gap-3 {
-  gap: 12px;
-}
-
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-}
-
-.thead,
-.trow {
-  display: grid;
-  grid-template-columns: 1fr 2fr 0.7fr;
-  gap: 8px;
-  align-items: start;
-}
-.thead {
-  font-size: 0.85rem;
-  color: var(--text-secondary);
-}
-.trow {
-  background: var(--bg-secondary);
-  border: 1px solid var(--bg-tertiary);
-  border-radius: 10px;
-  padding: 10px;
-}
-.empty-row {
-  padding: 12px;
-  text-align: center;
-  color: var(--text-secondary);
-  border: 1px dashed var(--bg-tertiary);
-  border-radius: 10px;
-}
-
-.username {
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.chips {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-.chip {
-  font-size: 0.8rem;
-  padding: 3px 8px;
-  border-radius: 999px;
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-  border: 1px solid var(--bg-tertiary);
-}
-
-.roles-box {
-  display: grid;
-  gap: 6px;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  background: var(--bg-tertiary);
-  border: 1px solid var(--bg-tertiary);
-  border-radius: 8px;
-  padding: 8px;
-}
-.role-check {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--bg-tertiary);
-  border-radius: 8px;
-  padding: 6px 8px;
-}
-.role-check .code {
-  opacity: 0.7;
-  margin-left: auto;
-}
-.role-check.dim {
-  opacity: 0.8;
-}
-.actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
+  .admin-sidebar.open { transform: translateX(0%); }
+  .burger { display: inline-block; }
 }
 </style>

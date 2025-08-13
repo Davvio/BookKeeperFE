@@ -4,6 +4,8 @@ import { ref, onMounted, computed } from 'vue'
 import { useItemsStore } from '@/stores/items'
 import { useLocationsStore } from '@/stores/locations'
 import { listTrades, type TradeOut, type TradeLineOut } from '@/services/tradesApi'
+import { useAuth } from '@/stores/auth'
+import { deleteTradeLine } from '@/services/tradesApi'
 
 const itemsStore = useItemsStore()
 const locsStore = useLocationsStore()
@@ -13,6 +15,13 @@ const errorMsg = ref('')
 const trades = ref<TradeOut[]>([])
 const expanded = ref<Set<number>>(new Set())
 const q = ref('') // search text
+const auth = useAuth()
+const isAdmin = computed(() =>
+  Boolean(
+    (auth as any)?.permissions?.['users.admin'] ||
+      (auth as any)?.user?.permissions?.['users.admin'],
+  ),
+)
 
 onMounted(async () => {
   loading.value = true
@@ -64,6 +73,34 @@ function mergedLines(t: TradeOut): Array<TradeLineOut & { direction: 'GAINED' | 
   const gained = (t.gained || []).map((l) => ({ ...l, direction: 'GAINED' as const }))
   const given = (t.given || []).map((l) => ({ ...l, direction: 'GIVEN' as const }))
   return [...gained, ...given]
+}
+
+async function removeLine(t: TradeOut, ln: TradeLineOut & { direction: 'GAINED' | 'GIVEN' }) {
+  if (!isAdmin.value) return
+  if (!confirm(`Delete this line: ${ln.direction} ${ln.quantity} × ${itemName(ln.item_id)} ?`))
+    return
+
+  try {
+    await deleteTradeLine(ln.id as unknown as number)
+
+    // remove from local arrays
+    const arr = ln.direction === 'GAINED' ? t.gained || [] : t.given || []
+    const idx = arr.findIndex((x) => x.id === ln.id)
+    if (idx >= 0) arr.splice(idx, 1)
+
+    // if no lines left, remove the whole trade
+    if ((t.gained?.length || 0) + (t.given?.length || 0) === 0) {
+      // collapse if expanded
+      const s = new Set(expanded.value)
+      s.delete(t.id)
+      expanded.value = s
+      // remove from list
+      trades.value = trades.value.filter((x) => x.id !== t.id)
+    }
+  } catch (e) {
+    console.error(e)
+    alert('Failed to delete line.')
+  }
 }
 
 /* ---------- SEARCH (includes user) ---------- */
@@ -160,14 +197,19 @@ const totalShown = computed(() => viewTrades.value.length)
             <!-- Expanded: exact tradelines -->
             <div v-if="isExpanded(t.id)" class="expanded">
               <div class="tr th sub">
+                <div class="cell exp"></div>
                 <div class="cell item">Item</div>
                 <div class="cell dir">Direction</div>
                 <div class="cell qty">Qty</div>
                 <div class="cell from">From (line)</div>
                 <div class="cell to">To (line)</div>
+                <div class="cell profit"></div>
+                <div class="cell act" v-if="isAdmin">Actions</div>
               </div>
 
               <div v-for="(ln, idx) in mergedLines(t)" :key="idx" class="tr subrow">
+                <div class="cell exp"></div>
+
                 <div class="cell item">{{ itemName(ln.item_id as any) }}</div>
                 <div class="cell dir">
                   <span class="chip" :class="ln.direction === 'GAINED' ? 'ok' : 'warn'">
@@ -177,6 +219,11 @@ const totalShown = computed(() => viewTrades.value.length)
                 <div class="cell qty">{{ ln.quantity }}</div>
                 <div class="cell from">{{ locName(ln.from_location_id as any) }}</div>
                 <div class="cell to">{{ locName(ln.to_location_id as any) }}</div>
+                <div class="cell profit"></div>
+
+                <div class="cell act" v-if="isAdmin">
+                  <button class="btn danger" @click.stop="removeLine(t, ln)">Delete</button>
+                </div>
               </div>
             </div>
           </div>
@@ -189,6 +236,10 @@ const totalShown = computed(() => viewTrades.value.length)
 </template>
 
 <style scoped>
+.table {
+  --cols-main: 35px 0.7fr 1fr 1fr 1fr 1fr 90px 120px;
+}
+
 .head {
   display: flex;
   align-items: center;
@@ -226,7 +277,7 @@ const totalShown = computed(() => viewTrades.value.length)
 }
 
 .card {
-  background: var(--bg-secondary, #1d2238);
+  background: var(--bg-tertiary);
   border-radius: 12px;
   padding: 8px;
 }
@@ -237,23 +288,23 @@ const totalShown = computed(() => viewTrades.value.length)
 /* Add a User column (160px) */
 .tr {
   display: grid;
-  grid-template-columns: 40px 80px 220px 160px 1fr 1fr 90px 120px;
+  grid-template-columns: var(--cols-main);
   gap: 8px;
   align-items: center;
   padding: 8px;
 }
 .th {
-  color: var(--text-muted, #8a92b2);
+  color: var(--text-secondary);
   font-size: 0.9rem;
 }
 
 .row {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--bg-secondary, #1d2238);
   border-radius: 8px;
   cursor: pointer;
 }
 .row:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--accent);
 }
 
 .expanded {
@@ -261,15 +312,27 @@ const totalShown = computed(() => viewTrades.value.length)
   border-left: 2px solid rgba(255, 255, 255, 0.08);
   padding-left: 12px;
 }
+
+.tr.subrow {
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
 .tr.subrow,
 .tr.th.sub {
-  grid-template-columns: 1.2fr 130px 100px 1fr 1fr;
+  grid-template-columns: var(--cols-main);
 }
 .cell {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.cell.act {
+  text-align: right;
+}
+
 .uid {
   color: var(--text-muted);
   margin-left: 6px;
@@ -286,7 +349,7 @@ const totalShown = computed(() => viewTrades.value.length)
 }
 
 .chip {
-  padding: 2px 8px;
+  padding: 0px 8px;
   border-radius: 999px;
   font-size: 0.8rem;
   border: 1px solid rgba(255, 255, 255, 0.15);
@@ -309,5 +372,21 @@ const totalShown = computed(() => viewTrades.value.length)
 .err {
   color: #ff9494;
   margin-bottom: 8px;
+}
+
+.btn {
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+  cursor: pointer;
+}
+.btn.danger {
+  background: #5a2323;
+  border-color: #7a2b2b;
+}
+.btn.danger:hover {
+  filter: brightness(1.05);
 }
 </style>
