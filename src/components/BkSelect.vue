@@ -8,6 +8,7 @@ const props = defineProps<{
   getLabel?: (x: any) => string
   getValue?: (x: any) => string | number
   placeholder?: string
+  getIconUrl?: (x: any) => string | null | undefined // <— NEW (optional)
 }>()
 const emit = defineEmits<{ (e: 'update:modelValue', v: any): void }>()
 
@@ -74,6 +75,13 @@ onBeforeUnmount(() => {
     >
       <span v-if="!currentLabel()" class="placeholder">{{ placeholder || 'Select…' }}</span>
       <span v-else>{{ currentLabel() }}</span>
+      <img
+        v-if="props.getIconUrl && props.getIconUrl(props.items[0])"
+        :src="props.getIconUrl(props.items[0])!"
+        class="bk-icon"
+        alt=""
+        @error="($event.target as HTMLImageElement).style.display = 'none'"
+      />
       <span class="chev" aria-hidden="true"></span>
     </button>
 
@@ -92,6 +100,13 @@ onBeforeUnmount(() => {
           :aria-selected="value(i) === modelValue ? 'true' : 'false'"
           @click="select(i)"
         >
+          <img
+            v-if="props.getIconUrl && props.getIconUrl(i)"
+            :src="props.getIconUrl(i)!"
+            class="bk-icon"
+            alt=""
+            @error="($event.target as HTMLImageElement).style.display = 'none'"
+          />
           {{ label(i) }}
         </div>
 
@@ -106,6 +121,14 @@ onBeforeUnmount(() => {
 .bk-select {
   position: relative;
   width: 100%;
+}
+
+.bk-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  object-fit: cover;
+  margin-right: 6px;
 }
 
 /* Trigger button */

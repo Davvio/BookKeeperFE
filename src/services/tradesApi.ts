@@ -2,19 +2,27 @@ import { api } from './api'
 
 export type Direction = 'GAINED' | 'GIVEN'
 
-export type TradeLineIn = {
+export interface TradeLineIn {
   item_id: number
-  direction: Direction
   quantity: number
-  from_location_id?: number | null
-  to_location_id?: number | null
+  direction: Direction
+  from_location_id?: number
+  from_user_id?: number
+  to_location_id?: number
+  to_user_id?: number
+  movement_reason_code?: string
 }
 
-export type TradeCreate = {
-  timestamp: string // ISO string
-  from_location_id?: number | null
-  to_location_id?: number | null
+export interface TradeCreate {
+  timestamp: string // ISO
+  from_location_id?: number // header defaults (optional)
+  to_location_id?: number // header defaults (optional)
   lines: TradeLineIn[]
+}
+
+export async function createTrade(payload: TradeCreate) {
+  const { data } = await api.post('/trades', payload)
+  return data
 }
 
 export type TradeLineOut = TradeLineIn & { id: number }
@@ -37,12 +45,6 @@ export async function deleteTradeLine(lineId: number): Promise<{
   deleted_trade: boolean
 }> {
   const { data } = await api.delete(`/trades/trade-lines/${lineId}`)
-  return data
-}
-
-
-export async function createTrade(payload: TradeCreate): Promise<TradeOut> {
-  const { data } = await api.post<TradeOut>('/trades', payload)
   return data
 }
 

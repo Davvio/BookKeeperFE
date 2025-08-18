@@ -14,6 +14,17 @@ import {
 } from '@/services/tradesApi'
 import type { Item } from '@/services/itemsApi'
 import type { Location } from '@/services/locationsApi'
+import { listUsersLite, type UserLite } from '@/services/usersApi'
+import { listMovementReasons, type MovementReason } from '@/services/movementReasonsApi'
+import { getItemIconUrl } from '@/services/itemsApi'
+import { useMovementReasonsStore } from '../stores/movementReasons'
+import PartySelect from '@/components/PartySelect.vue'
+
+type Party = 'location' | 'user'
+const partyOptions = [
+  { label: 'Location', value: 'location' },
+  { label: 'User', value: 'user' },
+]
 
 type Row = {
   item_id: number | null
@@ -21,10 +32,17 @@ type Row = {
   quantity: number | null
   from_location_id: number | null
   to_location_id: number | null
+  from_user_id: number | null
+  to_user_id: number | null
+  movement_reason_code: string | null // <— NEW
+  from_party: Party // <— NEW
+  to_party: Party // <— NEW
 }
 
+const showHeader = ref(false)
 const itemsStore = useItemsStore()
 const locsStore = useLocationsStore()
+const users = ref<UserLite[]>([])
 
 const saving = ref(false)
 const successMsg = ref('')
@@ -33,6 +51,7 @@ const errorMsg = ref('')
 const timestamp = ref(new Date().toISOString())
 const fromLocation = ref<number | null>(null)
 const toLocation = ref<number | null>(null)
+const reasonsStore = useMovementReasonsStore()
 
 const rows = ref<Row[]>([
   {
@@ -41,12 +60,42 @@ const rows = ref<Row[]>([
     quantity: null,
     from_location_id: null,
     to_location_id: null,
+    from_user_id: null,
+    to_user_id: null,
+    movement_reason_code: null,
+    from_party: 'location',
+    to_party: 'location',
   },
 ])
 
 onMounted(async () => {
   if (itemsStore.items.length === 0) await itemsStore.refresh()
   if (locsStore.locations.length === 0) await locsStore.refresh(true)
+  users.value = await listUsersLite()
+  await reasonsStore.ensureLoaded()
+
+  const raw = sessionStorage.getItem('bk_trade_draft')
+  if (raw) {
+    try {
+      const draft = JSON.parse(raw)
+      if (draft.timestamp) timestamp.value = draft.timestamp
+      fromLocation.value = draft.from_location_id ?? null
+      toLocation.value = draft.to_location_id ?? null
+      rows.value = (draft.lines || []).map((ln: any) => ({
+        item_id: ln.item_id ?? null,
+        direction: ln.direction ?? 'GAINED',
+        quantity: ln.quantity ?? null,
+        from_location_id: ln.from_location_id ?? null,
+        to_location_id: ln.to_location_id ?? null,
+        from_user_id: ln.from_user_id ?? null,
+        to_user_id: ln.to_user_id ?? null,
+        movement_reason_code: ln.movement_reason_code ?? null,
+        from_party: ln.from_user_id != null ? 'user' : 'location',
+        to_party: ln.to_user_id != null ? 'user' : 'location',
+      }))
+    } catch {}
+    sessionStorage.removeItem('bk_trade_draft')
+  }
 })
 
 function addRow(dir: Direction = 'GAINED') {
@@ -56,6 +105,11 @@ function addRow(dir: Direction = 'GAINED') {
     quantity: null,
     from_location_id: null,
     to_location_id: null,
+    from_user_id: null,
+    to_user_id: null,
+    movement_reason_code: null,
+    from_party: 'location',
+    to_party: 'location',
   })
 }
 
@@ -64,19 +118,32 @@ function removeRow(idx: number) {
   rows.value.splice(idx, 1)
 }
 
+function safeItemIconUrl(it: Partial<Item> | number | null | undefined): string | null {
+  // BkSelect may call this before items are loaded or with a primitive
+  if (it && typeof it === 'object' && 'id' in it && typeof it.id === 'number') {
+    const id = it.id as number
+    return getItemIconUrl(id, itemsStore.iconBust[id] ?? '')
+  }
+  return null
+}
+
 const canSubmit = computed(() => {
   if (rows.value.length === 0) return false
   for (let i = 0; i < rows.value.length; i++) {
     const r = rows.value[i]
     const okItemQty = r.item_id !== null && r.quantity !== null && r.quantity > 0
 
-    const effectiveFrom = resolveLoc(r.from_location_id as any, fromLocation.value)
-    const effectiveTo = resolveLoc(r.to_location_id as any, toLocation.value)
+    const effectiveFromLoc = resolveLoc(r.from_location_id as any, fromLocation.value)
+    const effectiveToLoc = resolveLoc(r.to_location_id as any, toLocation.value)
 
-    // at least one location present (change to && if you want both required)
-    const okLoc = effectiveFrom !== null || effectiveTo !== null
+    const okFrom =
+      (r.from_party === 'user' && r.from_user_id !== null) ||
+      (r.from_party === 'location' && effectiveFromLoc !== null)
+    const okTo =
+      (r.to_party === 'user' && r.to_user_id !== null) ||
+      (r.to_party === 'location' && effectiveToLoc !== null)
 
-    if (!(okItemQty && okLoc)) return false
+    if (!(okItemQty && okFrom && okTo)) return false
   }
   return true
 })
@@ -87,6 +154,14 @@ function labelItemById(id: number): string {
 }
 function getItemValue(item: Item): number {
   return item.id
+}
+
+function labelUserById(id: number): string {
+  const u = users.value.find((u) => u.id === id)
+  return u ? u.username : `#${id}`
+}
+function getUserValue(u: UserLite): number {
+  return u.id
 }
 
 function labelLocById(id: number): string {
@@ -115,18 +190,31 @@ async function submit() {
     return
   }
 
-  const lines: TradeLineIn[] = rows.value.map((r) => ({
-    item_id: r.item_id as number,
-    direction: r.direction,
-    quantity: Number(r.quantity),
-    from_location_id: resolveLoc(r.from_location_id as any, fromLocation.value),
-    to_location_id: resolveLoc(r.to_location_id as any, toLocation.value),
-  }))
+  const lines: TradeLineIn[] = rows.value.map((r) => {
+    const fromLoc = resolveLoc(r.from_location_id as any, fromLocation.value)
+    const toLoc = resolveLoc(r.to_location_id as any, toLocation.value)
+
+    const line: TradeLineIn = {
+      item_id: r.item_id as number,
+      direction: r.direction,
+      quantity: Number(r.quantity),
+    }
+
+    if (r.movement_reason_code) line.movement_reason_code = r.movement_reason_code
+
+    if (r.from_party === 'user') line.from_user_id = r.from_user_id as number
+    else if (fromLoc !== null) line.from_location_id = fromLoc as number
+
+    if (r.to_party === 'user') line.to_user_id = r.to_user_id as number
+    else if (toLoc !== null) line.to_location_id = toLoc as number
+
+    return line
+  })
 
   const payload: TradeCreate = {
     timestamp: timestamp.value,
-    from_location_id: fromLocation.value,
-    to_location_id: toLocation.value,
+    ...(fromLocation.value !== null ? { from_location_id: fromLocation.value } : {}),
+    ...(toLocation.value !== null ? { to_location_id: toLocation.value } : {}),
     lines,
   }
 
@@ -142,6 +230,11 @@ async function submit() {
         quantity: null,
         from_location_id: null,
         to_location_id: null,
+        from_user_id: null,
+        to_user_id: null,
+        movement_reason_code: null,
+        from_party: 'location',
+        to_party: 'location',
       },
     ]
     timestamp.value = new Date().toISOString()
@@ -156,10 +249,20 @@ async function submit() {
 
 <template>
   <div class="p-4">
-    <h2 class="text-xl mb-4">Create Trade</h2>
+    <div class="mb-3 flex items-center">
+      <h2 class="text-xl mb-4">Create Trade</h2>
+      <button
+        class="btn--sm ml-3"
+        @click="showHeader = !showHeader"
+        :aria-expanded="showHeader ? 'true' : 'false'"
+      >
+        <span class="arrow" aria-hidden="true">{{ showHeader ? '▾' : '▸' }}</span>
+        {{ showHeader ? 'Hide header' : 'Show header' }}
+      </button>
+    </div>
 
-    <div class="card">
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+    <div v-if="showHeader" class="card">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div>
           <label class="label">Timestamp</label>
           <input
@@ -198,32 +301,30 @@ async function submit() {
       <div class="flex items-center justify-between mb-3">
         <h3 class="text-lg">Lines</h3>
         <div class="flex gap-2">
-          <button class="btn" @click="addRow('GAINED')">+ Gained</button>
-          <button class="btn" @click="addRow('GIVEN')">+ Given</button>
+          <button class="btn" @click="addRow('GAINED')">+ Add Row</button>
         </div>
       </div>
 
       <div class="lines-header">
-        <div>Item</div>
-        <div>Direction</div>
+        <div>Movement type</div>
         <div>Qty</div>
+        <div>Item</div>
         <div>From (override)</div>
         <div>To (override)</div>
         <div></div>
       </div>
 
       <div v-for="(r, idx) in rows" :key="idx" class="lines-row">
+        <!-- Movement type -->
         <BkSelect
-          :items="itemsStore.items"
-          v-model="r.item_id"
-          :getLabel="(it: Item) => it.name"
-          :getValue="getItemValue"
-          placeholder="Select item..."
+          :items="reasonsStore.reasons"
+          v-model="r.movement_reason_code"
+          :getLabel="(mr: any) => mr.name"
+          :getValue="(mr: any) => mr.code"
+          placeholder="Select type…"
         />
-        <select v-model="r.direction" class="input">
-          <option value="GAINED">GAINED</option>
-          <option value="GIVEN">GIVEN</option>
-        </select>
+
+        <!-- Qty -->
         <input
           type="number"
           min="1"
@@ -231,20 +332,37 @@ async function submit() {
           :value="r.quantity ?? ''"
           @input="r.quantity = Number(($event.target as HTMLInputElement).value || '0')"
         />
+
+        <!-- Item (with icon) -->
         <BkSelect
-          :items="locsStore.locations"
-          v-model="r.from_location_id"
-          :getLabel="(loc: Location) => loc.name"
-          :getValue="getLocValue"
-          placeholder="Use header"
+          :items="itemsStore.items"
+          v-model="r.item_id"
+          :getLabel="(it: Item) => it.name"
+          :getValue="getItemValue"
+          :getIconUrl="safeItemIconUrl"
+          placeholder="Select item…"
         />
-        <BkSelect
-          :items="locsStore.locations"
-          v-model="r.to_location_id"
-          :getLabel="(loc: Location) => loc.name"
-          :getValue="getLocValue"
-          placeholder="Use header"
+
+        <!-- From (party + picker) -->
+        <PartySelect
+          v-model:party="r.from_party"
+          v-model:locationId="r.from_location_id"
+          v-model:userId="r.from_user_id"
+          :locations="locsStore.locations"
+          :users="users"
+          sideLabel="From"
         />
+
+        <!-- To (party + picker) -->
+        <PartySelect
+          v-model:party="r.to_party"
+          v-model:locationId="r.to_location_id"
+          v-model:userId="r.to_user_id"
+          :locations="locsStore.locations"
+          :users="users"
+          sideLabel="To"
+        />
+
         <button class="btn danger" @click="removeRow(idx)" :disabled="rows.length <= 1">×</button>
       </div>
     </div>
@@ -273,8 +391,8 @@ async function submit() {
   color: var(--text-secondary);
 }
 .input {
-  width: 100%;
-  padding: 8px 10px;
+  width: 95%;
+  padding: 8px 0px;
   background: var(--bg-tertiary);
   color: var(--text-primary);
   border: 1px solid var(--bg-tertiary);
@@ -360,8 +478,8 @@ async function submit() {
 .lines-header,
 .lines-row {
   display: grid;
-  grid-template-columns: 2fr 1fr 0.8fr 1.6fr 1.6fr 0.5fr;
-  gap: 8px;
+  grid-template-columns: 1.5fr 0.8fr 2fr 2.2fr 2.2fr 0.5fr; /* type | qty | item | from | to | remove */
+  gap: 12px;
   align-items: center;
 }
 .lines-header {

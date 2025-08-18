@@ -30,5 +30,19 @@ export const useLocationsStore = defineStore('locations', {
         this.loading = false
       }
     },
+
+    async ensureLoaded(force = false) {
+      if (!force && this.locations.length) return
+      this.loading = true
+      try {
+        this.locations = await listLocations()
+      } finally {
+        this.loading = false
+      }
+    },
+
+    async fetchAll(force = false) {
+      return this.ensureLoaded(force)
+    },
   },
 })

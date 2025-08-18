@@ -35,3 +35,14 @@ export async function replaceUserRoles(userId: number, roles: number[]): Promise
   } as UserUpdateRoles)
   return data
 }
+
+export interface UserLite {
+  id: number
+  username: string
+  structure_id: string
+}
+
+export async function listUsersLite(): Promise<UserLite[]> {
+  const { data } = await api.get('/users')
+  return data as UserLite[]
+}

@@ -50,6 +50,14 @@ const routes: RouteRecordRaw[] = [
             component: () => import('@/pages/StructureValuta.vue'),
             meta: { requiresAuth: true },
           },
+          {
+            path: 'admin/movement-reasons',
+            name: 'AdminMovementReasons',
+            meta: {
+              requiresAuth: true,
+            },
+            component: () => import('@/pages/AdminMovementReasons.vue'),
+          },
           // { path: 'rbac-graph', component: () => import('@/pages/AdminRbacGraph.vue'), meta: { requiresAuth: true } },
         ],
       },
