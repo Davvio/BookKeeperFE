@@ -68,6 +68,12 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true },
       },
 
+      {
+        path: '/inventory/players',
+        component: () => import('@/pages/PlayerInventory.vue'),
+        meta: { title: 'Player Inventory' },
+      },
+
       // Optional page
       {
         path: 'guild',
