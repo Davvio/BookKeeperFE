@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // src/stores/positions.ts
 import { defineStore } from 'pinia'
 import { startPollingPositions, type PositionEvent } from '@/services/positions'
@@ -101,7 +102,13 @@ export const usePositions = defineStore('positions', {
         const key = r.username.toLowerCase()
         const existing = next[key]
         const mapped = this.usersMap[key]
-        const userId = mapped ? mapped.user_id : null
+        const beUserId = (r as any).user_id
+        const userId =
+          typeof beUserId === 'number' || beUserId === null
+            ? (beUserId as number | null)
+            : mapped
+              ? mapped.user_id
+              : null
         const rec: PlayerState = {
           username: r.username,
           x: r.x,

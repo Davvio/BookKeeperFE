@@ -11,6 +11,15 @@ export default defineConfig({
       presets: [presetWind3()],
     }),
   ],
+  server: {
+    proxy: {
+      '/mc': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        secure: false,
+      },
+    },
+  },
 
   resolve: {
     alias: {

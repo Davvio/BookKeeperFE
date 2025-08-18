@@ -1,6 +1,5 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // src/services/positions.ts
-import { api } from '@/services/api' // used only for auth header reuse
 import { useAuth } from '@/stores/auth'
 
 export type PositionEvent = {
@@ -8,49 +7,60 @@ export type PositionEvent = {
   x: number
   y: number
   z: number
-  ts: string // ISO
-  world?: string
-  dimension?: string
+  ts: string
+  uuid?: string
+  user_id?: number | null
 }
 
-export type SnapshotResponse = PositionEvent[]
-
-// Poll the external mod API (no CORS cookies, just GET JSON). We still inject Authorization if your BE proxies in future.
+/**
+ * Polls the backend snapshot endpoint on an interval, including the admin JWT.
+ * Calls onData with a normalized array, even if the response is empty.
+ */
 export function startPollingPositions(
-  onData: (rows: SnapshotResponse) => void,
+  onData: (rows: PositionEvent[]) => void,
   url: string,
-  intervalMs: number,
+  intervalMs = 4000,
 ) {
-  let timer: number | null = null
-  let isStopped = false
+  let stopped = false
+  let timer: number | undefined
 
-  const fetchOnce = async () => {
-    if (isStopped) return
+  const tick = async () => {
+    if (stopped) return
     try {
       const auth = useAuth()
       const headers: Record<string, string> = {}
-      // Reuse current JWT if present (useful if you point url to your BE later)
-      if (auth.token && auth.token.length > 0) headers['Authorization'] = 'Bearer ' + auth.token
+      if (auth.token) headers['Authorization'] = `Bearer ${auth.token}`
 
-      // NOTE: using fetch to avoid axios baseURL & interceptors; URL is absolute (external mod)
       const res = await fetch(url, { headers })
-      if (!res.ok) throw new Error('Positions fetch failed: ' + res.status)
-      const data = (await res.json()) as SnapshotResponse
-      if (data && data.length >= 0) onData(data)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const payload = await res.json()
+
+      const rows: PositionEvent[] = Array.isArray(payload)
+        ? payload.map((r: any) => ({
+            username: String(r.username ?? r.name ?? ''),
+            x: Number(r.x ?? 0),
+            y: Number(r.y ?? 0),
+            z: Number(r.z ?? 0),
+            ts: String(r.ts ?? r.last_seen_at ?? new Date().toISOString()),
+            uuid: r.uuid ?? undefined,
+            user_id:
+              typeof r.user_id === 'number' ? r.user_id : r.user_id === null ? null : undefined,
+          }))
+        : []
+
+      onData(rows) // <- triggers status 'open' in the store
     } catch (err) {
-      // Swallow errors in demo; UI shows connection state separately
-      // console.warn(err)
+      console.error('[positions] poll error', err)
+      // still notify so UI can recover on next tick
+      onData([])
+    } finally {
+      timer = window.setTimeout(tick, intervalMs) as unknown as number
     }
   }
 
-  // kick immediately, then at interval
-  fetchOnce()
-  timer = window.setInterval(fetchOnce, intervalMs)
-
+  tick()
   return () => {
-    isStopped = true
-    if (timer !== null) {
-      window.clearInterval(timer)
-    }
+    stopped = true
+    if (timer) window.clearTimeout(timer)
   }
 }
