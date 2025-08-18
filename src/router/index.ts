@@ -23,6 +23,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/CreateTrade.vue'),
         meta: { requiresAuth: true },
       },
+      {
+        path: 'minecraft/map',
+        component: () => import('@/pages/MinecraftMap.vue'),
+        meta: { requiresAuth: true },
+      },
 
       // Catalogs & Admin
       {
@@ -58,6 +63,7 @@ const routes: RouteRecordRaw[] = [
             },
             component: () => import('@/pages/AdminMovementReasons.vue'),
           },
+
           // { path: 'rbac-graph', component: () => import('@/pages/AdminRbacGraph.vue'), meta: { requiresAuth: true } },
         ],
       },

@@ -19,7 +19,7 @@ export type UserUpdateRoles = {
   role_ids: number[]
 }
 
-export async function listUsers(): Promise<UserOut[]> {
+export async function listUsersOld(): Promise<UserOut[]> {
   const { data } = await api.get<UserOut[]>('/users')
   return data
 }
@@ -45,4 +45,10 @@ export interface UserLite {
 export async function listUsersLite(): Promise<UserLite[]> {
   const { data } = await api.get('/users')
   return data as UserLite[]
+}
+
+// src/services/usersApi.ts (ensure this exists)
+export async function listUsers() {
+  const res = await api.get('/users')
+  return res.data
 }
