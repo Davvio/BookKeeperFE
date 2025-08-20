@@ -62,6 +62,10 @@ const routes: RouteRecordRaw[] = [
             },
             component: () => import('@/pages/AdminMovementReasons.vue'),
           },
+          { path: 'parties', component: () => import('../pages/AdminParties.vue') },
+          { path: 'parties/:id', component: () => import('../pages/AdminPartyDetail.vue') },
+          { path: 'messages', component: () => import('../pages/AdminMessageOutbox.vue') },
+          { path: 'messages/compose', component: () => import('../pages/AdminMessageCompose.vue') },
 
           // { path: 'rbac-graph', component: () => import('@/pages/AdminRbacGraph.vue'), meta: { requiresAuth: true } },
         ],

@@ -17,13 +17,15 @@ const isAdmin = computed(() =>
 // Admin nav (only admin pages here)
 type NavItem = { label: string; to: string; icon?: string; adminOnly?: boolean }
 const nav: NavItem[] = [
-  { label: 'Users & Roles',     to: '/admin',                     icon: '👥', adminOnly: true },
-  { label: 'Items Catalog',     to: '/admin/items',               icon: '🧱' },
-  { label: 'Item Valuations',   to: '/admin/valuations',          icon: '💱', adminOnly: true },
-  { label: 'Structure Currency',to: '/admin/structure-currency',  icon: '🏛️', adminOnly: true },
+  { label: 'Users & Roles', to: '/admin', icon: '👥', adminOnly: true },
+  { label: 'Items Catalog', to: '/admin/items', icon: '🧱' },
+  { label: 'Item Valuations', to: '/admin/valuations', icon: '💱', adminOnly: true },
+  { label: 'Structure Currency', to: '/admin/structure-currency', icon: '🏛️', adminOnly: true },
+  { label: 'Parties/Teams', to: '/admin/parties', icon: '🎉', adminOnly: true },
+  { label: 'Messages', to: '/admin/messages', icon: '💬', adminOnly: true },
   // { label: 'RBAC Graph',      to: '/admin/rbac-graph',          icon: '🕸️', adminOnly: true },
 ]
-const visibleNav = computed(() => nav.filter(n => !n.adminOnly || isAdmin.value))
+const visibleNav = computed(() => nav.filter((n) => !n.adminOnly || isAdmin.value))
 const sidebarOpen = ref(false)
 </script>
 
@@ -57,7 +59,9 @@ const sidebarOpen = ref(false)
     <!-- Main -->
     <main class="admin-content">
       <header class="topbar">
-        <button class="burger" @click="sidebarOpen = !sidebarOpen" aria-label="Toggle sidebar">☰</button>
+        <button class="burger" @click="sidebarOpen = !sidebarOpen" aria-label="Toggle sidebar">
+          ☰
+        </button>
         <h1 class="title">Admin Area</h1>
       </header>
 
@@ -80,54 +84,137 @@ const sidebarOpen = ref(false)
 /* Sidebar */
 .admin-sidebar {
   background: var(--bg-secondary);
-  border-right: 1px solid rgba(255,255,255,.08);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
   padding: 14px 12px;
-  position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
 }
-.brand { display: flex; align-items: center; gap: 10px; margin: 4px 6px 12px; font-weight: 700; }
-.logo-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px rgba(92,106,196,.25); }
-.menu { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 6px 12px;
+  font-weight: 700;
+}
+.logo-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(92, 106, 196, 0.25);
+}
+.menu {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
 .nav-link {
-  position: relative; display: flex; align-items: center; gap: 10px;
-  padding: 10px 12px; border-radius: 10px; color: var(--text-primary);
-  text-decoration: none; border: 1px solid transparent;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  color: var(--text-primary);
+  text-decoration: none;
+  border: 1px solid transparent;
 }
-.nav-link:hover { background: var(--bg-tertiary); border-color: rgba(255,255,255,.08); }
-.nav-link .icon { width: 22px; text-align: center; opacity: .9; }
-.nav-link .text { flex: 1; }
+.nav-link:hover {
+  background: var(--bg-tertiary);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+.nav-link .icon {
+  width: 22px;
+  text-align: center;
+  opacity: 0.9;
+}
+.nav-link .text {
+  flex: 1;
+}
 .active-bar {
-  position: absolute; left: -12px; top: 8px; bottom: 8px; width: 3px;
-  background: var(--accent); border-radius: 999px; opacity: 0; transform: scaleY(.3);
-  transition: opacity .15s ease, transform .15s ease;
+  position: absolute;
+  left: -12px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  background: var(--accent);
+  border-radius: 999px;
+  opacity: 0;
+  transform: scaleY(0.3);
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease;
 }
-.active-bar.show { opacity: 1; transform: scaleY(1); }
-.foot { margin-top: auto; padding-top: 14px; color: var(--text-muted); font-size: .9rem; }
-.role { padding: 2px 8px; border-radius: 999px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); }
+.active-bar.show {
+  opacity: 1;
+  transform: scaleY(1);
+}
+.foot {
+  margin-top: auto;
+  padding-top: 14px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+.role {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
 
 /* Main */
-.admin-content { display: flex; flex-direction: column; min-width: 0; }
+.admin-content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
 .topbar {
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,.08);
-  background: linear-gradient(0deg, rgba(255,255,255,.02), rgba(255,255,255,.02));
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(0deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.02));
 }
 .burger {
-  display: none; padding: 6px 10px; border-radius: 8px;
-  background: var(--bg-tertiary); color: var(--text-primary);
-  border: 1px solid rgba(255,255,255,.12); cursor: pointer;
+  display: none;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  cursor: pointer;
 }
-.title { font-size: 1.05rem; opacity: .9; }
-.page { padding: 14px; }
+.title {
+  font-size: 1.05rem;
+  opacity: 0.9;
+}
+.page {
+  padding: 14px;
+}
 
 /* Responsive */
 @media (max-width: 980px) {
-  .admin-shell { grid-template-columns: 1fr; }
-  .admin-sidebar {
-    position: fixed; inset: 0 auto 0 0; width: 240px; z-index: 30;
-    transform: translateX(-100%); transition: transform .2s ease;
-    box-shadow: 0 10px 30px rgba(0,0,0,.4);
+  .admin-shell {
+    grid-template-columns: 1fr;
   }
-  .admin-sidebar.open { transform: translateX(0%); }
-  .burger { display: inline-block; }
+  .admin-sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: 240px;
+    z-index: 30;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  }
+  .admin-sidebar.open {
+    transform: translateX(0%);
+  }
+  .burger {
+    display: inline-block;
+  }
 }
 </style>
