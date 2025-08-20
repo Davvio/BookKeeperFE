@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useAuth } from '@/stores/auth'
 
@@ -25,7 +24,7 @@ const routes: RouteRecordRaw[] = [
       },
       {
         path: 'minecraft/map',
-        component: () => import('@/pages/MinecraftMap.vue'),
+        component: () => import('@/pages/MinecraftMapDep.vue'),
         meta: { requiresAuth: true },
       },
 
@@ -92,22 +91,21 @@ const routes: RouteRecordRaw[] = [
 
 const router = createRouter({ history: createWebHistory(), routes })
 
-router.beforeEach((to, _from, next) => {
+router.beforeEach((to, from, next) => {
   const auth = useAuth()
-  if (!auth.token) auth.init()
+  // Rehydrate once per app start (safe in guard)
+  if (!auth.token) auth.initFromStorage()
 
-  if (to.meta && (to.meta as any).requiresAuth && !auth.isLogged) {
-    next('/login')
-    return
+  const needsAuth = to.meta?.requiresAuth || to.meta?.requiresAdmin
+  const needsAdmin = to.meta?.requiresAdmin
+
+  if (needsAuth && (!auth.isAuthenticated || auth.isExpired)) {
+    const redirect = encodeURIComponent(to.fullPath)
+    return next({ path: '/login', query: { redirect } })
   }
-
-  const needPerm = (to.meta as any)?.needPerm as string | undefined
-  if (needPerm && !auth.can(needPerm)) {
-    // no permission: send to dashboard
-    next('/')
-    return
+  if (needsAdmin && !auth.isAdmin) {
+    return next({ path: '/' })
   }
-
   next()
 })
 

@@ -117,7 +117,7 @@ function initMap() {
 }
 
 onMounted(() => {
-  if (!auth.can('users.admin')) return
+  if (!auth.isAdmin) return
   initMap()
 })
 

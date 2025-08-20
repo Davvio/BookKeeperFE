@@ -1,3 +1,4 @@
+<!-- eslint-disable @typescript-eslint/no-unused-vars -->
 <script setup lang="ts">
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { computed } from 'vue'
@@ -38,8 +39,10 @@ function isActive(path: string) {
   return route.path === path
 }
 
-function logout() {
-  auth.logout(router)
+async function logout() {
+  await auth.logout()
+  const redirect = encodeURIComponent(route.fullPath)
+  router.replace(`/login?redirect=${redirect}`)
 }
 </script>
 
