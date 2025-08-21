@@ -27,6 +27,7 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/MinecraftMapDep.vue'),
         meta: { requiresAuth: true },
       },
+      { path: 'comms', component: () => import('../pages/CommsPage.vue') },
 
       // Catalogs & Admin
       {

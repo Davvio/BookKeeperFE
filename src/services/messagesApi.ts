@@ -53,3 +53,53 @@ export async function sendMessageToParty(
   const { data } = await api.post(`/parties/${partyId}/messages`, payload)
   return data
 }
+
+export type MCMessage = {
+  id: number
+  text: string
+  kind: string
+  meta: Record<string, unknown>
+  expires_at?: string | null
+  priority: string
+  created_at: string
+  position: 'TOP' | 'LEFT' | 'RIGHT' | 'BOTTOM'
+}
+
+export async function getInbox(): Promise<MCMessage[]> {
+  const { data } = await api.get('/mc/messages')
+  return data
+}
+
+export async function ackMessages(deliveredIds: number[], failedIds: number[]) {
+  return api.post('/mc/messages/ack', {
+    delivered: deliveredIds && deliveredIds.length ? deliveredIds : undefined,
+    failed: failedIds && failedIds.length ? failedIds : undefined,
+  })
+}
+
+export type OutboxMessage = {
+  id: number
+  text: string
+  kind: string
+  created_at: string
+  targets: string[]
+  status?: string
+}
+
+export type OutboxCreate = {
+  text: string
+  kind: string
+  to_user_ids?: number[]
+  to_party_ids?: number[]
+  // You can extend with deliver_after, expires_at, requires_ack, priority...
+}
+
+export async function getOutbox(limit = 50): Promise<OutboxMessage[]> {
+  const { data } = await api.get('/messages/outbox', { params: { limit } })
+  return data
+}
+
+export async function sendOutboxMessage(payload: OutboxCreate) {
+  const { data } = await api.post('/messages/outbox', payload)
+  return data
+}
