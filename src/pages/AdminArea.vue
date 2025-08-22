@@ -1,75 +1,50 @@
 <!-- eslint-disable @typescript-eslint/no-explicit-any -->
 <!-- src/pages/AdminArea.vue -->
 <!-- eslint-disable vue/multi-word-component-names -->
+<!-- src/pages/admin/AdminArea.vue -->
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { RouterLink, RouterView } from 'vue-router'
+import { computed } from 'vue'
 import { useAuth } from '@/stores/auth'
 
 const auth = useAuth()
-const isAdmin = computed(() =>
-  Boolean(
-    (auth as any)?.permissions?.['users.admin'] ||
-      (auth as any)?.user?.permissions?.['users.admin'],
-  ),
-)
-
-// Admin nav (only admin pages here)
-type NavItem = { label: string; to: string; icon?: string; adminOnly?: boolean }
-const nav: NavItem[] = [
-  { label: 'Users & Roles', to: '/admin', icon: '👥', adminOnly: true },
-  { label: 'Items Catalog', to: '/admin/items', icon: '🧱' },
-  { label: 'Item Valuations', to: '/admin/valuations', icon: '💱', adminOnly: true },
-  { label: 'Structure Currency', to: '/admin/structure-currency', icon: '🏛️', adminOnly: true },
-  { label: 'Parties/Teams', to: '/admin/parties', icon: '🎉', adminOnly: true },
-  { label: 'Messages', to: '/admin/messages', icon: '💬', adminOnly: true },
-  // { label: 'RBAC Graph',      to: '/admin/rbac-graph',          icon: '🕸️', adminOnly: true },
-]
-const visibleNav = computed(() => nav.filter((n) => !n.adminOnly || isAdmin.value))
-const sidebarOpen = ref(false)
+const isAdmin = computed(() => {
+  try {
+    const json = JSON.parse(atob((auth.token || '').split('.')[1] || '')) || {}
+    return !!(json.permissions && json.permissions['users.admin'])
+  } catch {
+    return false
+  }
+})
 </script>
 
 <template>
-  <div class="admin-shell">
-    <!-- Sidebar -->
-    <aside :class="['admin-sidebar', sidebarOpen && 'open']">
-      <div class="brand"><span class="logo-dot" /> Admin</div>
-
-      <nav class="menu">
-        <RouterLink
-          v-for="item in visibleNav"
-          :key="item.to"
-          :to="item.to"
-          class="nav-link"
-          v-slot="{ isActive }"
-          @click="sidebarOpen = false"
+  <div class="p-4 grid gap-4 md:grid-cols-[220px_1fr] min-h-[60vh]">
+    <!-- internal admin sidebar -->
+    <aside class="bg-[var(--bg-secondary)] rounded-xl p-3 h-fit">
+      <div class="text-sm opacity-80 mb-2">Admin</div>
+      <nav class="flex flex-col gap-1">
+        <RouterLink to="/admin/users-roles" class="px-3 py-2 rounded hover:bg-[var(--bg-tertiary)]"
+          >Users & Roles</RouterLink
         >
-          <span class="icon" v-if="item.icon">{{ item.icon }}</span>
-          <span class="text">{{ item.label }}</span>
-          <span class="active-bar" :class="{ show: isActive }" />
-        </RouterLink>
+        <RouterLink to="/admin/structure" class="px-3 py-2 rounded hover:bg-[var(--bg-tertiary)]"
+          >Structure Settings</RouterLink
+        >
+        <RouterLink
+          to="/admin/movement-reasons"
+          class="px-3 py-2 rounded hover:bg-[var(--bg-tertiary)]"
+          >Movement Reasons</RouterLink
+        >
+        <!-- <RouterLink to="/admin/policies" class="px-3 py-2 rounded hover:bg-[var(--bg-tertiary)]"
+          >Message Policies</RouterLink
+        > -->
       </nav>
-
-      <div class="foot">
-        <span class="role" v-if="isAdmin">Admin</span>
-        <span class="role" v-else>User</span>
-      </div>
+      <div v-if="!isAdmin" class="mt-3 text-xs text-red-400">You don’t have admin permissions.</div>
     </aside>
 
-    <!-- Main -->
-    <main class="admin-content">
-      <header class="topbar">
-        <button class="burger" @click="sidebarOpen = !sidebarOpen" aria-label="Toggle sidebar">
-          ☰
-        </button>
-        <h1 class="title">Admin Area</h1>
-      </header>
-
-      <section class="page">
-        <!-- Child admin pages render here -->
-        <RouterView />
-      </section>
-    </main>
+    <!-- content -->
+    <section class="min-w-0">
+      <RouterView />
+    </section>
   </div>
 </template>
 

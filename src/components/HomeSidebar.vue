@@ -1,3 +1,4 @@
+<!-- src/components/HomeSidebar.vue -->
 <!-- eslint-disable @typescript-eslint/no-unused-vars -->
 <script setup lang="ts">
 import { RouterLink, useRoute, useRouter } from 'vue-router'
@@ -7,36 +8,34 @@ import { useAuth } from '@/stores/auth'
 const route = useRoute()
 const router = useRouter()
 const auth = useAuth()
-if (!auth.token) auth.init()
+// Rehydrate once per app start (mirrors index.ts guard)
+if (!auth.token) auth.initFromStorage?.()
 
 type NavItem = { to: string; label: string }
 
-const baseNav: NavItem[] = [
+const primaryNav: NavItem[] = [
   { to: '/', label: 'Dashboard' },
   { to: '/trades', label: 'All Trades' },
   { to: '/create-trade', label: 'Create Trade' },
-  { to: '/inventory/players', label: 'Player Inventory' },
-  { to: '/locations', label: 'Locations' },
   { to: '/comms', label: 'Communications' },
-  // { to: '/admin/rbac', label: 'RBAC Graph' }, // deferred
+  { to: '/inventory', label: 'Inventory' },
+  { to: '/inventory/players', label: 'Player Inventory' },
+]
+
+const dataNav: NavItem[] = [
+  { to: '/items', label: 'Items' },
+  { to: '/valuations', label: 'Valuations' },
+  { to: '/locations', label: 'Locations' },
 ]
 
 const adminNav: NavItem[] = [{ to: '/admin', label: 'Admin Area' }]
-const guildNav: NavItem[] = [
-  { to: '/guild', label: 'Guild Master' },
-  { to: '/inventory', label: 'Inventory' },
-]
 
-const nav = computed<NavItem[]>(() => {
-  const items = baseNav.slice()
-  // Show admin area if the user has the admin permission
-  if (auth.can('users.admin')) items.push(...adminNav)
-  // Show guild page for guildmasters or users managing locations
-  if (auth.hasRole('GUILDMASTER') || auth.can('locations.manage')) items.push(...guildNav)
-  return items
-})
+// flat list if you really want it, but we'll render grouped below
+const nav = computed(() => [...primaryNav, ...dataNav])
 
 function isActive(path: string) {
+  // Exact for most, prefix for /admin (so /admin/users-roles highlights)
+  if (path === '/admin') return route.path.startsWith('/admin')
   return route.path === path
 }
 
@@ -53,22 +52,65 @@ async function logout() {
   >
     <h1 class="text-xl font-bold text-[var(--text-primary)] mb-6 px-2">BookKeeper</h1>
 
-    <!-- Navigation -->
-    <nav class="flex flex-col gap-2">
-      <RouterLink
-        v-for="item in nav"
-        :key="item.to"
-        :to="item.to"
-        class="flex items-center gap-2 px-3 py-2 rounded-lg transition-all duration-150"
-        :class="[
-          isActive(item.to)
-            ? 'bg-[var(--accent)] text-white font-semibold'
-            : 'hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]',
-        ]"
-      >
-        <span>{{ item.label }}</span>
-      </RouterLink>
-    </nav>
+    <!-- Primary -->
+    <div class="mb-3">
+      <div class="px-3 pb-1 text-xs uppercase tracking-wide opacity-60">Primary</div>
+      <nav class="flex flex-col gap-2">
+        <RouterLink
+          v-for="item in primaryNav"
+          :key="item.to"
+          :to="item.to"
+          class="flex items-center gap-2 px-3 py-2 rounded-lg transition-all duration-150"
+          :class="[
+            isActive(item.to)
+              ? 'bg-[var(--accent)] text-white font-semibold'
+              : 'hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]',
+          ]"
+        >
+          <span>{{ item.label }}</span>
+        </RouterLink>
+      </nav>
+    </div>
+
+    <!-- Data -->
+    <div class="mb-3">
+      <div class="px-3 pb-1 text-xs uppercase tracking-wide opacity-60">Data</div>
+      <nav class="flex flex-col gap-2">
+        <RouterLink
+          v-for="item in dataNav"
+          :key="item.to"
+          :to="item.to"
+          class="flex items-center gap-2 px-3 py-2 rounded-lg transition-all duration-150"
+          :class="[
+            isActive(item.to)
+              ? 'bg-[var(--accent)] text-white font-semibold'
+              : 'hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]',
+          ]"
+        >
+          <span>{{ item.label }}</span>
+        </RouterLink>
+      </nav>
+    </div>
+
+    <!-- Admin -->
+    <div v-if="auth.isAdmin" class="mb-3">
+      <div class="px-3 pb-1 text-xs uppercase tracking-wide opacity-60">Admin</div>
+      <nav class="flex flex-col gap-2">
+        <RouterLink
+          v-for="item in adminNav"
+          :key="item.to"
+          :to="item.to"
+          class="flex items-center gap-2 px-3 py-2 rounded-lg transition-all duration-150"
+          :class="[
+            isActive(item.to)
+              ? 'bg-[var(--accent)] text-white font-semibold'
+              : 'hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]',
+          ]"
+        >
+          <span>{{ item.label }}</span>
+        </RouterLink>
+      </nav>
+    </div>
 
     <!-- Footer -->
     <div class="mt-auto px-3 pt-6 border-t border-[var(--bg-tertiary)] text-sm flex flex-col gap-2">
@@ -82,7 +124,7 @@ async function logout() {
           <span v-for="code in auth.role_codes" :key="code" class="role-chip" :title="code">
             {{ code }}
           </span>
-          <span v-if="auth.role_codes.length === 0" class="text-xs capitalize">
+          <span v-if="auth.role_codes?.length === 0" class="text-xs capitalize">
             {{ (auth.primaryRole || 'EMPLOYEE').toLowerCase() }}
           </span>
         </div>

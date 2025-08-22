@@ -1,12 +1,27 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useItemsStore } from '@/stores/items'
 import { uploadItemIcon, getItemIconUrl, type Item, createItem } from '@/services/itemsApi'
+import { useAuth } from '@/stores/auth'
 
 const itemsStore = useItemsStore()
 const uploadingId = ref<number | null>(null)
 
-// --- create form state ---
+const auth = useAuth()
+
+function hasPerm(key: string) {
+  // fallback if auth.can isn't available
+  try {
+    const json = JSON.parse(atob((auth.token || '').split('.')[1] || '')) || {}
+    return !!json.permissions?.[key]
+  } catch {
+    return false
+  }
+}
+const canManageItems = computed(
+  () => !!(auth.isAdmin || auth.can?.('items.manage') || hasPerm('items.manage')),
+)
+
 const showCreate = ref(false)
 const name = ref('')
 const code = ref('')
@@ -32,6 +47,7 @@ watch(name, (v) => {
 })
 
 async function submitCreate() {
+  if (!canManageItems.value) return
   createErr.value = ''
   if (!name.value.trim()) return (createErr.value = 'Name is required.')
   if (!code.value.trim()) return (createErr.value = 'Code is required.')
@@ -62,6 +78,7 @@ async function submitCreate() {
 }
 
 async function onPick(e: Event, item: Item) {
+  if (!canManageItems.value) return
   const file = (e.target as HTMLInputElement).files?.[0]
   ;(e.target as HTMLInputElement).value = ''
   if (!file) return
@@ -79,13 +96,13 @@ async function onPick(e: Event, item: Item) {
   <div class="p-4">
     <div class="flex items-center justify-between mb-4">
       <h1 class="text-xl">Items Catalog</h1>
-      <button class="btn btn--sm" @click="showCreate = !showCreate">
+      <button class="btn btn--sm" v-if="canManageItems" @click="showCreate = !showCreate">
         {{ showCreate ? 'Cancel' : '+ Add item' }}
       </button>
     </div>
 
     <!-- Create form -->
-    <div v-if="showCreate" class="card mb-4">
+    <div v-if="showCreate && canManageItems" class="card mb-4">
       <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
         <div class="md:col-span-2">
           <label class="label">Name</label>
@@ -143,7 +160,7 @@ async function onPick(e: Event, item: Item) {
         <div>{{ it.is_active ? 'Yes' : 'No' }}</div>
 
         <div class="w-32 text-right">
-          <label class="btn btn--sm">
+          <label v-if="canManageItems" class="btn btn--sm">
             {{ uploadingId === it.id ? 'Uploading…' : 'Upload icon' }}
             <input
               type="file"

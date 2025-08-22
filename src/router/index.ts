@@ -22,11 +22,6 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/CreateTrade.vue'),
         meta: { requiresAuth: true },
       },
-      {
-        path: 'minecraft/map',
-        component: () => import('@/pages/MinecraftMapDep.vue'),
-        meta: { requiresAuth: true },
-      },
       { path: 'comms', component: () => import('../pages/CommsPage.vue') },
 
       {
@@ -35,49 +30,16 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true },
       },
 
-      // Catalogs & Admin
       {
-        path: '/admin',
-        component: () => import('@/pages/AdminArea.vue'), // the layout with sidebar
+        path: 'items',
+        component: () => import('@/pages/ItemsCatalog.vue'),
         meta: { requiresAuth: true },
-        children: [
-          {
-            path: '',
-            component: () => import('@/pages/AdminUsersRoles.vue'),
-            meta: { requiresAuth: true },
-          },
-          {
-            path: 'items',
-            component: () => import('@/pages/ItemsCatalog.vue'),
-            meta: { requiresAuth: true },
-          },
-          {
-            path: 'valuations',
-            component: () => import('@/pages/ItemValuations.vue'),
-            meta: { requiresAuth: true },
-          },
-          {
-            path: 'structure-currency',
-            component: () => import('@/pages/StructureValuta.vue'),
-            meta: { requiresAuth: true },
-          },
-          {
-            path: 'admin/movement-reasons',
-            name: 'AdminMovementReasons',
-            meta: {
-              requiresAuth: true,
-            },
-            component: () => import('@/pages/AdminMovementReasons.vue'),
-          },
-          { path: 'parties', component: () => import('../pages/AdminParties.vue') },
-          { path: 'parties/:id', component: () => import('../pages/AdminPartyDetail.vue') },
-          { path: 'messages', component: () => import('../pages/AdminMessageOutbox.vue') },
-          { path: 'messages/compose', component: () => import('../pages/AdminMessageCompose.vue') },
-
-          // { path: 'rbac-graph', component: () => import('@/pages/AdminRbacGraph.vue'), meta: { requiresAuth: true } },
-        ],
       },
-
+      {
+        path: 'valuations',
+        component: () => import('@/pages/ItemValuations.vue'),
+        meta: { requiresAuth: true },
+      },
       {
         path: 'inventory',
         component: () => import('@/pages/Inventory.vue'),
@@ -90,11 +52,24 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'Player Inventory' },
       },
 
-      // Optional page
+      // Catalogs & Admin
       {
-        path: 'guild',
-        component: () => import('@/pages/GuildMaster.vue'),
-        meta: { requiresAuth: true },
+        path: 'admin',
+        component: () => import('@/pages/AdminArea.vue'),
+        meta: { requiresAdmin: true },
+        children: [
+          { path: '', redirect: '/admin/users-roles' },
+          { path: 'users-roles', component: () => import('@/pages/AdminUsersRoles.vue') },
+          { path: 'structure', component: () => import('@/pages/StructureValuta.vue') },
+          {
+            path: 'movement-reasons',
+            component: () => import('@/pages/AdminMovementReasons.vue'),
+          },
+          // {
+          //   path: 'policies',
+          //   component: () => import('@/pages/AdminPoliciesPlaceholder.vue'),
+          // },
+        ],
       },
     ],
   },

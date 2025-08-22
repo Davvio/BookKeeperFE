@@ -1,252 +1,320 @@
 <!-- eslint-disable @typescript-eslint/no-explicit-any -->
-<!-- eslint-disable @typescript-eslint/no-unused-vars -->
-<!-- src/pages/AdminUsersRoles.vue -->
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
-import { AxiosError } from 'axios'
-import { listUsers, createUser, replaceUserRoles, type UserOut } from '@/services/usersApi'
-import { listRoles, type Role } from '@/services/rolesApi'
+import { ref, computed, onMounted } from 'vue'
+import { useToast } from '@/stores/toast'
 import { useAuth } from '@/stores/auth'
+import { api } from '@/services/api'
+import { listUsers as listUsersApi, createUser as createUserApi } from '@/services/usersApi'
+import { listRoles as listRolesApi } from '@/services/rolesApi'
 
+type UserRow = {
+  id: number
+  username: string
+  structure_id: string
+  role_ids: number[]
+  role_codes: string[]
+  role_names: string[]
+}
+
+const ALLOWED_ROLE_CODES = ['ADMIN', 'QUARTERMASTER', 'EMPLOYEE'] as const
+type AllowedRole = (typeof ALLOWED_ROLE_CODES)[number]
+
+const toast = useToast()
 const auth = useAuth()
-const isAdmin = computed(() =>
-  Boolean(
-    (auth as any)?.permissions?.['users.admin'] ||
-      (auth as any)?.user?.permissions?.['users.admin'],
-  ),
-)
+const isAdmin = computed(() => {
+  try {
+    const json = JSON.parse(atob((auth.token || '').split('.')[1] || '')) || {}
+    return !!(json.permissions && json.permissions['users.admin'])
+  } catch {
+    return false
+  }
+})
 
-// Data
 const loading = ref(false)
-const savingCreate = ref(false)
-const savingEdit = ref<Record<number, boolean>>({})
-const errorMsg = ref('')
-const successMsg = ref('')
+const users = ref<UserRow[]>([])
+const roles = ref<{ id: number; code: string; name: string }[]>([])
+const codeToId = ref<Record<string, number>>({})
 
-// Lists
-const users = ref<UserOut[]>([])
-const roles = ref<Role[]>([])
-
-// Create form
-const newUsername = ref('')
-const newPassword = ref('')
-const newRoleIds = ref<number[]>([])
-
-// Inline edit state
-const editingUserId = ref<number | null>(null)
-const editRoleIds = ref<number[]>([])
-
-// Search
 const q = ref('')
 
-// Derived
-const roleMap = computed(() => {
-  const m: Record<number, Role> = {}
-  for (const r of roles.value) m[r.id] = r
-  return m
-})
-const filteredUsers = computed<UserOut[]>(() => {
-  const term = q.value.trim().toLowerCase()
-  if (!term) return users.value
-  return users.value.filter(
-    (u) =>
-      u.username.toLowerCase().includes(term) ||
-      u.role_names.some((n) => n.toLowerCase().includes(term)) ||
-      u.role_codes.some((c) => c.toLowerCase().includes(term)),
-  )
-})
+// existing: track edited role selections (codes) per user
+const selectedRoles = ref<Record<number, Set<AllowedRole>>>({})
 
-async function loadAll() {
+function setFromInitial(u: UserRow) {
+  const s = new Set<AllowedRole>()
+  for (const c of u.role_codes) {
+    if (ALLOWED_ROLE_CODES.includes(c as AllowedRole)) s.add(c as AllowedRole)
+  }
+  selectedRoles.value[u.id] = s
+}
+
+async function load() {
   loading.value = true
-  errorMsg.value = ''
   try {
-    roles.value = await listRoles()
-    users.value = await listUsers()
-  } catch (e) {
-    const ax = e as AxiosError<{ detail?: string }>
-    errorMsg.value = ax?.response?.data?.detail || 'Failed to load admin data.'
+    users.value = await listUsersApi()
+    try {
+      roles.value = await listRolesApi()
+    } catch {
+      roles.value = []
+    }
+    const allowed = roles.value.filter((r) => ALLOWED_ROLE_CODES.includes(r.code as AllowedRole))
+    codeToId.value = Object.fromEntries(allowed.map((r) => [r.code, r.id]))
+    for (const u of users.value) setFromInitial(u)
   } finally {
     loading.value = false
   }
 }
-onMounted(loadAll)
+onMounted(load)
 
-function resetCreateForm() {
-  newUsername.value = ''
-  newPassword.value = ''
-  newRoleIds.value = []
+const filtered = computed(() => {
+  const t = q.value.trim().toLowerCase()
+  if (!t) return users.value
+  return users.value.filter((u) => (u.username || '').toLowerCase().includes(t))
+})
+
+function toggle(u: UserRow, code: AllowedRole) {
+  const s = selectedRoles.value[u.id] || new Set<AllowedRole>()
+  if (s.has(code)) s.delete(code)
+  else s.add(code)
+  selectedRoles.value[u.id] = s
 }
 
-async function onCreateUser() {
-  errorMsg.value = ''
-  successMsg.value = ''
-  if (newUsername.value.trim().length < 3)
-    return (errorMsg.value = 'Username must be at least 3 characters.')
-  if (newPassword.value.length < 6)
-    return (errorMsg.value = 'Password must be at least 6 characters.')
-  if (newRoleIds.value.length === 0) return (errorMsg.value = 'Select at least one role.')
-  savingCreate.value = true
+function changed(u: UserRow) {
+  const s = selectedRoles.value[u.id] || new Set<AllowedRole>()
+  const initial = new Set<AllowedRole>(
+    u.role_codes.filter((c) => ALLOWED_ROLE_CODES.includes(c as AllowedRole)) as AllowedRole[],
+  )
+  if (s.size !== initial.size) return true
+  for (const c of s) if (!initial.has(c)) return true
+  return false
+}
+
+async function save(u: UserRow) {
+  if (!isAdmin.value) return
+  const s = selectedRoles.value[u.id] || new Set<AllowedRole>()
+  const role_codes = Array.from(s)
+  const role_ids = role_codes
+    .map((code) => codeToId.value[code])
+    .filter((v) => typeof v === 'number')
+
+  if (role_ids.length !== role_codes.length) {
+    const missing = role_codes.filter((code) => !(code in codeToId.value))
+    toast.push(`Missing roles in this structure: ${missing.join(', ')}`, 'error', 4000)
+    return
+  }
+
   try {
-    const res = await createUser({
-      username: newUsername.value.trim(),
-      password: newPassword.value,
-      role_ids: newRoleIds.value.slice(),
+    await api.patch(`/users/${u.id}/roles`, { role_ids })
+    toast.push(`Updated roles for ${u.username}`, 'success')
+    u.role_codes = role_codes
+    u.role_names = role_codes
+  } catch (e: any) {
+    toast.push(e?.response?.data?.detail || 'Failed to update roles', 'error', 4000)
+  }
+}
+
+/* ---------------------------
+   NEW USER: modal + handler
+----------------------------*/
+const createOpen = ref(false)
+const nu_username = ref('')
+const nu_password = ref('')
+const nu_roles = ref<Set<AllowedRole>>(new Set<AllowedRole>(['EMPLOYEE'])) // default EMPLOYEE
+
+const canSubmitNew = computed(() => {
+  const nameOk = nu_username.value.trim().length >= 3
+  const passOk = nu_password.value.length >= 6
+  const rolesOk = nu_roles.value.size > 0
+  return nameOk && passOk && rolesOk
+})
+
+function toggleNewRole(code: AllowedRole) {
+  const s = nu_roles.value
+  if (s.has(code)) s.delete(code)
+  else s.add(code)
+}
+
+async function submitCreateUser() {
+  if (!isAdmin.value || !canSubmitNew.value) return
+  const role_codes = Array.from(nu_roles.value)
+  const role_ids = role_codes
+    .map((code) => codeToId.value[code])
+    .filter((v) => typeof v === 'number')
+
+  if (role_ids.length !== role_codes.length) {
+    const missing = role_codes.filter((code) => !(code in codeToId.value))
+    toast.push(`Missing roles in this structure: ${missing.join(', ')}`, 'error', 4000)
+    return
+  }
+
+  try {
+    await createUserApi({
+      username: nu_username.value.trim(),
+      password: nu_password.value,
+      role_ids,
     })
-    users.value.unshift(res)
-    successMsg.value = `User '${res.username}' created.`
-    resetCreateForm()
-  } catch (e) {
-    const ax = e as AxiosError<{ detail?: string }>
-    errorMsg.value = ax?.response?.data?.detail || 'Failed to create user.'
-  } finally {
-    savingCreate.value = false
+    toast.push(`User "${nu_username.value.trim()}" created`, 'success')
+    // reset + close
+    nu_username.value = ''
+    nu_password.value = ''
+    nu_roles.value = new Set<AllowedRole>(['EMPLOYEE'])
+    createOpen.value = false
+    // refresh list
+    await load()
+  } catch (e: any) {
+    toast.push(e?.response?.data?.detail || 'Failed to create user', 'error', 4000)
   }
-}
-
-function startEdit(u: UserOut) {
-  editingUserId.value = u.id
-  editRoleIds.value = u.role_ids.slice()
-}
-function cancelEdit() {
-  editingUserId.value = null
-  editRoleIds.value = []
-}
-function isEditing(u: UserOut) {
-  return editingUserId.value === u.id
-}
-function toggleRoleInEdit(roleId: number) {
-  const i = editRoleIds.value.indexOf(roleId)
-  if (i === -1) editRoleIds.value.push(roleId)
-  else editRoleIds.value.splice(i, 1)
-}
-async function saveEdit(u: UserOut) {
-  const uid = u.id
-  savingEdit.value[uid] = true
-  errorMsg.value = ''
-  successMsg.value = ''
-  try {
-    const updated = await replaceUserRoles(uid, editRoleIds.value.slice())
-    const idx = users.value.findIndex((x) => x.id === uid)
-    if (idx >= 0) users.value[idx] = updated
-    successMsg.value = `Roles updated for '${updated.username}'.`
-    cancelEdit()
-  } catch (e) {
-    const ax = e as AxiosError<{ detail?: string }>
-    errorMsg.value = ax?.response?.data?.detail || 'Failed to update roles.'
-  } finally {
-    savingEdit.value[uid] = false
-  }
-}
-function roleNameById(id: number) {
-  const r = roleMap.value[id]
-  return r ? r.name : '#' + String(id)
 }
 </script>
 
 <template>
-  <div class="p-4">
-    <h2 class="text-xl mb-4">Users & Roles</h2>
-
-    <div v-if="loading">Loading…</div>
-    <div v-else>
-      <div v-if="errorMsg" class="alert err">{{ errorMsg }}</div>
-      <div v-if="successMsg" class="alert ok">{{ successMsg }}</div>
-
-      <!-- Create user -->
-      <div class="card mb-4">
-        <h3 class="text-lg mb-2">Create User</h3>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div>
-            <label class="label">Username</label>
-            <input class="input" v-model.trim="newUsername" placeholder="username" />
-          </div>
-          <div>
-            <label class="label">Password</label>
-            <input type="password" class="input" v-model="newPassword" placeholder="password" />
-          </div>
-          <div>
-            <label class="label">Roles</label>
-            <div class="roles-box">
-              <label v-for="r in roles" :key="'create-' + r.id" class="role-check" :title="r.code">
-                <input
-                  type="checkbox"
-                  :value="r.id"
-                  :checked="newRoleIds.includes(r.id)"
-                  @change="
-                    ($event.target as HTMLInputElement).checked
-                      ? newRoleIds.push(r.id)
-                      : newRoleIds.splice(newRoleIds.indexOf(r.id), 1)
-                  "
-                />
-                <span>{{ r.name }}</span>
-                <small class="code">{{ r.code }}</small>
-              </label>
-            </div>
-          </div>
-        </div>
-        <div class="mt-3">
-          <button class="btn primary" :disabled="savingCreate" @click="onCreateUser">Create</button>
-          <span v-if="savingCreate" class="ml-2">Saving…</span>
-        </div>
+  <div class="space-y-4">
+    <div class="flex items-center gap-2">
+      <h1 class="text-xl">Users & Roles</h1>
+      <div class="ml-auto flex items-center gap-2">
+        <input
+          v-model="q"
+          placeholder="Search user…"
+          class="w-[min(360px,100%)] px-3 py-2 rounded-md bg-[var(--bg-tertiary)] outline-none"
+        />
+        <button
+          v-if="isAdmin"
+          class="px-3 py-2 rounded bg-[var(--accent)] text-[var(--bg-primary)]"
+          @click="createOpen = true"
+        >
+          + New user
+        </button>
       </div>
+    </div>
 
-      <!-- Users list -->
-      <div class="card">
-        <div class="toolbar">
-          <input class="input" placeholder="Search users or roles…" v-model="q" />
-        </div>
+    <div class="rounded-xl bg-[var(--bg-secondary)] p-2 overflow-auto">
+      <table class="w-full text-sm">
+        <thead class="text-left text-[var(--text-muted)]">
+          <tr>
+            <th class="px-3 py-2">User</th>
+            <th class="px-3 py-2">Structure</th>
+            <th class="px-3 py-2">Roles</th>
+            <th class="px-3 py-2 w-[160px]">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-if="loading">
+            <td colspan="4" class="px-3 py-6 text-center opacity-70">Loading…</td>
+          </tr>
+          <tr v-else-if="!filtered.length">
+            <td colspan="4" class="px-3 py-6 text-center opacity-70">No users found.</td>
+          </tr>
 
-        <div class="thead">
-          <div>Username</div>
-          <div>Roles</div>
-          <div class="text-right">Actions</div>
-        </div>
-
-        <div v-if="filteredUsers.length === 0" class="empty-row">No users.</div>
-
-        <div v-for="u in filteredUsers" :key="u.id" class="trow">
-          <div class="username">{{ u.username }}</div>
-          <div>
-            <div v-if="!isEditing(u)" class="chips">
-              <span v-for="(name, idx) in u.role_names" :key="u.id + '-r-' + idx" class="chip">{{
-                name
-              }}</span>
-            </div>
-            <div v-else class="roles-box">
-              <label
-                v-for="r in roles"
-                :key="'edit-' + u.id + '-' + r.id"
-                class="role-check"
-                :class="{ dim: r.is_system && auth.username !== 'admin' }"
-                :title="r.code"
-              >
-                <input
-                  type="checkbox"
-                  :value="r.id"
-                  :checked="editRoleIds.includes(r.id)"
-                  @change="toggleRoleInEdit(r.id)"
-                />
-                <span>{{ r.name }}</span>
-                <small class="code">{{ r.code }}</small>
-              </label>
-            </div>
-          </div>
-
-          <div class="text-right actions">
-            <template v-if="!isEditing(u)">
-              <button class="btn" @click="startEdit(u)">Edit roles</button>
-            </template>
-            <template v-else>
+          <tr v-for="u in filtered" :key="u.id" class="border-t border-[var(--border-subtle)]">
+            <td class="px-3 py-2">
+              <div class="font-medium">{{ u.username }}</div>
+              <div class="text-xs opacity-70">#{{ u.id }}</div>
+            </td>
+            <td class="px-3 py-2">{{ u.structure_id }}</td>
+            <td class="px-3 py-2">
+              <div class="flex flex-wrap gap-2">
+                <label
+                  v-for="code in ['ADMIN', 'QUARTERMASTER', 'EMPLOYEE']"
+                  :key="code"
+                  class="inline-flex items-center gap-2 px-2 py-1 rounded bg-[var(--bg-tertiary)]"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="(selectedRoles[u.id] || new Set()).has(code as any)"
+                    @change="toggle(u, code as any)"
+                    :disabled="!isAdmin"
+                  />
+                  <span class="text-xs">{{ code }}</span>
+                </label>
+              </div>
+            </td>
+            <td class="px-3 py-2">
               <button
-                class="btn primary"
-                :disabled="savingEdit[u.id] === true"
-                @click="saveEdit(u)"
+                class="px-3 py-1 rounded bg-[var(--accent)] text-[var(--bg-primary)] disabled:opacity-50"
+                :disabled="!isAdmin || !changed(u)"
+                @click="save(u)"
               >
                 Save
               </button>
-              <button class="btn" @click="cancelEdit">Cancel</button>
-            </template>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Create User modal -->
+    <div v-if="createOpen" class="fixed inset-0 z-50 flex items-center justify-center">
+      <div class="absolute inset-0 bg-black/55" @click="createOpen = false" />
+      <div
+        class="relative w-[min(560px,94vw)] p-4 rounded-xl bg-[var(--bg-secondary)] shadow-[var(--panel-shadow)]"
+      >
+        <div class="text-lg font-medium">Create user</div>
+
+        <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div class="min-w-0 md:col-span-2">
+            <label class="block text-xs opacity-80 mb-1">Username</label>
+            <input
+              v-model="nu_username"
+              class="w-full max-w-full min-w-0 block px-3 py-2 rounded bg-[var(--bg-tertiary)] outline-none"
+              placeholder="username"
+            />
+            <div
+              v-if="nu_username.trim().length > 0 && nu_username.trim().length < 3"
+              class="text-xs text-red-400 mt-1"
+            >
+              Min 3 characters.
+            </div>
           </div>
+
+          <div class="min-w-0 md:col-span-2">
+            <label class="block text-xs opacity-80 mb-1">Password</label>
+            <input
+              v-model="nu_password"
+              type="password"
+              class="w-full max-w-full min-w-0 block px-3 py-2 rounded bg-[var(--bg-tertiary)] outline-none"
+              placeholder="temporary password"
+            />
+            <div
+              v-if="nu_password.length > 0 && nu_password.length < 6"
+              class="text-xs text-red-400 mt-1"
+            >
+              Min 6 characters.
+            </div>
+          </div>
+
+          <div class="min-w-0 md:col-span-2">
+            <label class="block text-xs opacity-80 mb-1">Roles</label>
+            <div class="flex flex-wrap gap-2">
+              <label
+                v-for="code in ['ADMIN', 'QUARTERMASTER', 'EMPLOYEE']"
+                :key="code"
+                class="inline-flex items-center gap-2 px-2 py-1 rounded bg-[var(--bg-tertiary)]"
+              >
+                <input
+                  type="checkbox"
+                  :checked="nu_roles.has(code as any)"
+                  @change="toggleNewRole(code as any)"
+                />
+                <span class="text-xs">{{ code }}</span>
+              </label>
+            </div>
+            <div v-if="nu_roles.size === 0" class="text-xs text-red-400 mt-1">
+              Select at least one role.
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-4 flex justify-end gap-2">
+          <button class="px-3 py-2 rounded bg-[var(--bg-tertiary)]" @click="createOpen = false">
+            Cancel
+          </button>
+          <button
+            class="px-3 py-2 rounded bg-[var(--accent)] text-[var(--bg-primary)] disabled:opacity-50"
+            :disabled="!canSubmitNew"
+            @click="submitCreateUser"
+          >
+            Create
+          </button>
         </div>
       </div>
     </div>

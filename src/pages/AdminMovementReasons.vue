@@ -1,118 +1,268 @@
+<!-- eslint-disable @typescript-eslint/no-explicit-any -->
+<!-- src/pages/old/AdminMovementReasons.vue -->
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { useMovementReasonsStore } from '@/stores/movementReasons'
+import { ref, computed, onMounted } from 'vue'
+import { useToast } from '@/stores/toast'
+import { useAuth } from '@/stores/auth'
+import {
+  listMovementReasons,
+  createMovementReason,
+  updateMovementReason,
+  type MovementReason,
+  type MovementReasonIn,
+} from '@/services/movementReasonsApi'
 
-const store = useMovementReasonsStore()
-const creating = ref(false)
-const newCode = ref('')
-const newName = ref('')
-const errorMsg = ref('')
+const toast = useToast()
+const auth = useAuth()
 
-onMounted(async () => {
-  await store.ensureLoaded()
+const canManage = computed(() => {
+  try {
+    const json = JSON.parse(atob((auth.token || '').split('.')[1] || '')) || {}
+    const p = json.permissions || {}
+    // BE also checks movement_reasons.manage; UI gate helps UX
+    return !!(p['movement_reasons.manage'] || p['users.admin'])
+  } catch {
+    return false
+  }
 })
 
-async function createReason() {
-  errorMsg.value = ''
+const loading = ref(false)
+const q = ref('')
+const onlyActive = ref(false)
+
+const rows = ref<MovementReason[]>([])
+const edits = ref<Array<MovementReasonIn & { __origCode: string }>>([])
+
+async function load() {
+  loading.value = true
   try {
-    if (!newCode.value.trim() || !newName.value.trim()) {
-      errorMsg.value = 'Code and name are required.'
-      return
-    }
-    await store.addReason({
-      code: newCode.value.trim(),
-      name: newName.value.trim(),
-      is_active: true,
+    rows.value = await listMovementReasons(!onlyActive.value ? undefined : true)
+    // build editable copies; keep original path code in __origCode
+    edits.value = rows.value.map((r) => ({
+      __origCode: r.code,
+      code: r.code,
+      name: r.name,
+      is_active: r.is_active,
+    }))
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(load)
+
+const filtered = computed(() => {
+  const term = q.value.trim().toLowerCase()
+  if (!term) return edits.value
+  return edits.value.filter((e) => `${e.code} ${e.name}`.toLowerCase().includes(term))
+})
+
+function isChanged(e: MovementReasonIn & { __origCode: string }) {
+  const orig = rows.value.find((r) => r.code === e.__origCode)
+  if (!orig) return true
+  return orig.code !== e.code || orig.name !== e.name || orig.is_active !== e.is_active
+}
+
+async function saveRow(e: MovementReasonIn & { __origCode: string }) {
+  if (!canManage.value) return
+  if (!e.code.trim() || !e.name.trim()) {
+    toast.push('Code and Name are required', 'error', 3000)
+    return
+  }
+  try {
+    const saved = await updateMovementReason(e.__origCode, {
+      code: e.code.trim(),
+      name: e.name.trim(),
+      is_active: e.is_active,
     })
-    newCode.value = ''
-    newName.value = ''
-    creating.value = false
-  } catch {
-    errorMsg.value = 'Failed to create reason.'
+    toast.push('Movement reason updated', 'success')
+    // reflect in rows + edits; update __origCode if code was changed
+    const idx = rows.value.findIndex((r) => r.code === e.__origCode)
+    if (idx >= 0) rows.value[idx] = saved
+    const eidx = edits.value.findIndex((x) => x.__origCode === e.__origCode)
+    if (eidx >= 0)
+      edits.value[eidx] = {
+        __origCode: saved.code,
+        code: saved.code,
+        name: saved.name,
+        is_active: saved.is_active,
+      }
+  } catch (err: any) {
+    const msg = err?.response?.data?.detail || 'Update failed'
+    toast.push(msg, 'error', 4000)
   }
 }
 
-async function toggleActive(code: string, current: boolean) {
+function resetRow(e: MovementReasonIn & { __origCode: string }) {
+  const orig = rows.value.find((r) => r.code === e.__origCode)
+  if (!orig) return
+  e.code = orig.code
+  e.name = orig.name
+  e.is_active = orig.is_active
+}
+
+const createOpen = ref(false)
+const newForm = ref<MovementReasonIn>({ code: '', name: '', is_active: true })
+
+function openCreate() {
+  newForm.value = { code: '', name: '', is_active: true }
+  createOpen.value = true
+}
+async function submitCreate() {
+  if (!canManage.value) return
+  if (!newForm.value.code.trim() || !newForm.value.name.trim()) {
+    toast.push('Code and Name are required', 'error', 3000)
+    return
+  }
   try {
-    await store.patchReason(code, { is_active: !current })
-  } catch {
-    // optional toast
-  }
-}
-
-async function rename(code: string, name: string) {
-  const newLabel = prompt('New name', name)
-  if (newLabel && newLabel.trim() && newLabel !== name) {
-    try {
-      await store.patchReason(code, { name: newLabel.trim() })
-    } catch {
-      /* ignore */
-    }
-  }
-}
-
-async function remove(code: string) {
-  if (!confirm(`Delete reason "${code}"?`)) return
-  try {
-    await store.removeReason(code)
-  } catch {
-    /* ignore */
+    await createMovementReason({
+      code: newForm.value.code.trim(),
+      name: newForm.value.name.trim(),
+      is_active: newForm.value.is_active,
+    })
+    toast.push('Movement reason created', 'success')
+    createOpen.value = false
+    await load()
+  } catch (err: any) {
+    const msg = err?.response?.data?.detail || 'Create failed'
+    toast.push(msg, 'error', 4000)
   }
 }
 </script>
 
 <template>
-  <div class="p-4 max-w-3xl">
-    <div class="flex items-center justify-between mb-4">
-      <h1 class="text-xl font-semibold">Movement Reasons</h1>
-      <button class="btn" @click="creating = !creating">
-        {{ creating ? 'Cancel' : 'Add reason' }}
-      </button>
-    </div>
-
-    <div v-if="creating" class="card mb-4">
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div>
-          <label class="label">Code</label>
-          <input class="input" v-model.trim="newCode" placeholder="e.g. MINED" />
-        </div>
-        <div class="md:col-span-2">
-          <label class="label">Name</label>
-          <input class="input" v-model.trim="newName" placeholder="e.g. Mined" />
-        </div>
-      </div>
-      <div class="mt-3 flex gap-2">
-        <button class="btn primary" @click="createReason">Create</button>
-        <span v-if="errorMsg" class="err">{{ errorMsg }}</span>
+  <div class="p-4 space-y-4">
+    <div class="flex items-center gap-2">
+      <h1 class="text-xl">Movement Reasons</h1>
+      <div class="ml-auto flex items-center gap-3">
+        <label class="flex items-center gap-2 text-sm opacity-90">
+          <input type="checkbox" v-model="onlyActive" @change="load" />
+          Active only
+        </label>
+        <input
+          v-model="q"
+          placeholder="Search code or name…"
+          class="w-[min(320px,100%)] px-3 py-2 rounded-md bg-[var(--bg-tertiary)] outline-none"
+        />
+        <button
+          v-if="canManage"
+          class="px-3 py-2 rounded bg-[var(--accent)] text-[var(--bg-primary)]"
+          @click="openCreate"
+        >
+          + New reason
+        </button>
       </div>
     </div>
 
-    <div class="card">
-      <div class="table-head">
-        <div>Code</div>
-        <div>Name</div>
-        <div>Status</div>
-        <div class="w-32 text-right">Actions</div>
-      </div>
-      <div v-for="r in store.reasons" :key="r.code" class="table-row">
-        <div class="mono">{{ r.code }}</div>
-        <div>{{ r.name }}</div>
-        <div>
-          <span class="pill" :class="r.is_active ? 'ok' : 'muted'">{{
-            r.is_active ? 'Active' : 'Inactive'
-          }}</span>
+    <div class="rounded-xl bg-[var(--bg-secondary)] p-2 overflow-auto">
+      <table class="w-full text-sm">
+        <thead class="text-left text-[var(--text-muted)]">
+          <tr>
+            <th class="px-3 py-2">Code</th>
+            <th class="px-3 py-2">Name</th>
+            <th class="px-3 py-2">Active</th>
+            <th class="px-3 py-2 w-[200px]">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-if="loading">
+            <td colspan="4" class="px-3 py-6 text-center opacity-70">Loading…</td>
+          </tr>
+          <tr v-else-if="!filtered.length">
+            <td colspan="4" class="px-3 py-6 text-center opacity-70">No movement reasons found.</td>
+          </tr>
+
+          <tr
+            v-for="e in filtered"
+            :key="e.__origCode"
+            class="border-t border-[var(--border-subtle)]"
+          >
+            <td class="px-3 py-2">
+              <input
+                v-model="e.code"
+                :disabled="!canManage"
+                class="w-full max-w-full min-w-0 block px-2 py-1 rounded bg-[var(--bg-tertiary)] outline-none"
+              />
+              <div class="text-[10px] opacity-60 mt-1">Original: {{ e.__origCode }}</div>
+            </td>
+            <td class="px-3 py-2">
+              <input
+                v-model="e.name"
+                :disabled="!canManage"
+                class="w-full max-w-full min-w-0 block px-2 py-1 rounded bg-[var(--bg-tertiary)] outline-none"
+              />
+              <div class="text-[10px] opacity-60 mt-1">Current Name</div>
+            </td>
+            <td class="px-3 py-2">
+              <label class="inline-flex items-center gap-2">
+                <input type="checkbox" v-model="e.is_active" :disabled="!canManage" />
+                <span>{{ e.is_active ? 'Yes' : 'No' }}</span>
+              </label>
+            </td>
+            <td class="px-3 py-2">
+              <div class="flex items-center gap-2">
+                <button
+                  class="px-3 py-1 rounded bg-[var(--accent)] text-[var(--bg-primary)] disabled:opacity-50"
+                  :disabled="!canManage || !isChanged(e)"
+                  @click="saveRow(e)"
+                >
+                  Save
+                </button>
+                <button
+                  class="px-3 py-1 rounded bg-[var(--bg-tertiary)]"
+                  :disabled="!canManage || !isChanged(e)"
+                  @click="resetRow(e)"
+                >
+                  Reset
+                </button>
+                <!-- No Delete: backend does not expose DELETE /movement-reasons/{code} -->
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Create modal -->
+    <div v-if="createOpen" class="fixed inset-0 z-50 flex items-center justify-center">
+      <div class="absolute inset-0 bg-black/55" @click="createOpen = false" />
+      <div
+        class="relative w-[min(560px,94vw)] p-4 rounded-xl bg-[var(--bg-secondary)] shadow-[var(--panel-shadow)]"
+      >
+        <div class="text-lg font-medium">New movement reason</div>
+        <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div class="min-w-0">
+            <label class="block text-xs opacity-80 mb-1">Code</label>
+            <input
+              v-model="newForm.code"
+              class="w-full max-w-full min-w-0 block px-3 py-2 rounded bg-[var(--bg-tertiary)] outline-none"
+            />
+          </div>
+          <div class="min-w-0">
+            <label class="block text-xs opacity-80 mb-1">Name</label>
+            <input
+              v-model="newForm.name"
+              class="w-full max-w-full min-w-0 block px-3 py-2 rounded bg-[var(--bg-tertiary)] outline-none"
+            />
+          </div>
+          <div class="min-w-0 md:col-span-2">
+            <label class="inline-flex items-center gap-2">
+              <input type="checkbox" v-model="newForm.is_active" />
+              <span>Active</span>
+            </label>
+          </div>
         </div>
-        <div class="text-right space-x-2">
-          <button class="btn" @click="rename(r.code, r.name)">Rename</button>
-          <button class="btn" @click="toggleActive(r.code, r.is_active)">
-            {{ r.is_active ? 'Deactivate' : 'Activate' }}
+        <div class="mt-4 flex justify-end gap-2">
+          <button class="px-3 py-2 rounded bg-[var(--bg-tertiary)]" @click="createOpen = false">
+            Cancel
           </button>
-          <button class="btn danger" @click="remove(r.code)">Delete</button>
+          <button
+            class="px-3 py-2 rounded bg-[var(--accent)] text-[var(--bg-primary)]"
+            @click="submitCreate"
+          >
+            Create
+          </button>
         </div>
-      </div>
-      <div v-if="store.loading" class="p-3 text-sm text-gray-400">Loading…</div>
-      <div v-if="!store.loading && store.reasons.length === 0" class="p-3 text-sm text-gray-400">
-        No reasons yet.
       </div>
     </div>
   </div>

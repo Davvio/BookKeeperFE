@@ -4,6 +4,7 @@ import { AxiosError } from 'axios'
 import BkSelect from '@/components/BkSelect.vue'
 import { useItemsStore } from '@/stores/items'
 import { listValues, createValue } from '@/services/valuesApi'
+import { useAuth } from '@/stores/auth'
 
 type ItemValue = {
   id: number
@@ -12,6 +13,20 @@ type ItemValue = {
   value_in_currency: string
   effective_from: string
 }
+
+const auth = useAuth()
+function hasPerm(key: string) {
+  // fallback if auth.can isn't available
+  try {
+    const json = JSON.parse(atob((auth.token || '').split('.')[1] || '')) || {}
+    return !!json.permissions?.[key]
+  } catch {
+    return false
+  }
+}
+const canEditValuations = computed(
+  () => !!(auth.isAdmin || auth.can?.('valuations.manage') || hasPerm('valuations.manage')),
+)
 
 const itemsStore = useItemsStore()
 
@@ -136,7 +151,7 @@ function itemName(id: number | null): string {
     <div v-if="errorMsg" class="alert err">{{ errorMsg }}</div>
     <div v-if="successMsg" class="alert ok">{{ successMsg }}</div>
 
-    <div class="card mb-4">
+    <div class="card mb-4" v-if="canEditValuations">
       <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div>
           <label class="label">Item</label>
