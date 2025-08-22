@@ -16,7 +16,7 @@ const baseNav: NavItem[] = [
   { to: '/trades', label: 'All Trades' },
   { to: '/create-trade', label: 'Create Trade' },
   { to: '/inventory/players', label: 'Player Inventory' },
-  { to: '/minecraft/map', label: 'Minecraft Map' },
+  { to: '/locations', label: 'Locations' },
   { to: '/comms', label: 'Communications' },
   // { to: '/admin/rbac', label: 'RBAC Graph' }, // deferred
 ]

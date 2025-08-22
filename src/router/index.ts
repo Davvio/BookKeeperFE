@@ -29,6 +29,12 @@ const routes: RouteRecordRaw[] = [
       },
       { path: 'comms', component: () => import('../pages/CommsPage.vue') },
 
+      {
+        path: 'locations',
+        component: () => import('@/pages/LocationsPage.vue'),
+        meta: { requiresAuth: true },
+      },
+
       // Catalogs & Admin
       {
         path: '/admin',

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import Sidebar from '../components/HomeSidebar.vue'
 import TopBar from '../components/TopBar.vue'
+import ToastHost from '@/components/ui/ToastHost.vue'
 </script>
 
 <template>
@@ -12,6 +13,7 @@ import TopBar from '../components/TopBar.vue'
       <main class="flex-1 overflow-y-auto p-6">
         <router-view />
       </main>
+      <ToastHost />
     </div>
   </div>
 </template>
