@@ -11,16 +11,19 @@ const auth = useAuth()
 // Rehydrate once per app start (mirrors index.ts guard)
 if (!auth.token) auth.initFromStorage?.()
 
-type NavItem = { to: string; label: string }
+type NavItem = { to: string; label: string; gated?: boolean }
 
-const primaryNav: NavItem[] = [
+const primaryNavAll: NavItem[] = [
   { to: '/', label: 'Dashboard' },
-  { to: '/trades', label: 'All Trades' },
-  { to: '/create-trade', label: 'Create Trade' },
+  { to: '/trades', label: 'All Entries' },
+  { to: '/create-trade', label: 'Create Entry', gated: true },
   { to: '/comms', label: 'Communications' },
-  { to: '/inventory', label: 'Inventory' },
-  { to: '/inventory/players', label: 'Player Inventory' },
+  { to: '/inventory', label: 'Inventory', gated: true },
 ]
+
+const primaryNav = computed(() =>
+  primaryNavAll.filter((i) => !i.gated || canCreateEntry.value).map(({ gated, ...rest }) => rest),
+)
 
 const dataNav: NavItem[] = [
   { to: '/items', label: 'Items' },
@@ -31,7 +34,7 @@ const dataNav: NavItem[] = [
 const adminNav: NavItem[] = [{ to: '/admin', label: 'Admin Area' }]
 
 // flat list if you really want it, but we'll render grouped below
-const nav = computed(() => [...primaryNav, ...dataNav])
+const nav = computed(() => [...primaryNav.value, ...dataNav])
 
 function isActive(path: string) {
   // Exact for most, prefix for /admin (so /admin/users-roles highlights)
@@ -44,6 +47,18 @@ async function logout() {
   const redirect = encodeURIComponent(route.fullPath)
   router.replace(`/login?redirect=${redirect}`)
 }
+
+function hasPerm(key: string) {
+  try {
+    const json = JSON.parse(atob((auth.token || '').split('.')[1] || '')) || {}
+    return !!json.permissions?.[key]
+  } catch {
+    return false
+  }
+}
+const canCreateEntry = computed(
+  () => auth.hasRole?.('ADMIN') || auth.hasRole?.('QUARTERMASTER') || hasPerm('inventory.admin'),
+)
 </script>
 
 <template>

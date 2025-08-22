@@ -16,6 +16,17 @@ import { listUsersLite, type UserLite } from '@/services/usersApi'
 import type { Item } from '@/services/itemsApi'
 import type { Location } from '@/services/locationsApi'
 
+const auth = useAuth()
+function hasPerm(key: string) {
+  try {
+    const json = JSON.parse(atob((auth.token || '').split('.')[1] || '')) || {}
+    return !!json.permissions?.[key]
+  } catch {
+    return false
+  }
+}
+const scopeLabel = computed(() => (hasPerm('trades.view_all') ? 'All' : 'All your entries'))
+
 const router = useRouter()
 const itemsStore = useItemsStore()
 const locsStore = useLocationsStore()
@@ -27,7 +38,6 @@ const trades = ref<TradeOut[]>([])
 const expanded = ref<Set<number>>(new Set())
 const q = ref('') // search text
 
-const auth = useAuth()
 const isAdmin = computed(() =>
   Boolean(
     (auth as any)?.permissions?.['users.admin'] ||
@@ -81,7 +91,7 @@ onMounted(async () => {
     trades.value = await listTrades()
   } catch (e) {
     console.error(e)
-    errorMsg.value = 'Failed to load trades.'
+    errorMsg.value = 'Failed to load entries.'
   } finally {
     loading.value = false
   }
@@ -257,10 +267,13 @@ function duplicateTrade(t: TradeOut) {
 </script>
 
 <template>
-  <div class="p-4">
-    <div class="head">
-      <h2 class="title">All Trades</h2>
-
+  <div class="p-4 space-y-3">
+    <div class="head gap-3">
+      <h1 class="text-xl">All Entries</h1>
+      <div class="px-2 py-1 text-xs rounded bg-[var(--bg-tertiary)] text-[var(--text-primary)]">
+        Scope: {{ scopeLabel }}
+      </div>
+      <div class="ml-auto"></div>
       <!-- Search + Filters -->
       <div class="actions">
         <input

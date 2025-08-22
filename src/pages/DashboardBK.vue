@@ -1,531 +1,463 @@
-<!-- eslint-disable @typescript-eslint/no-unused-vars -->
 <!-- eslint-disable @typescript-eslint/no-explicit-any -->
-<!-- eslint-disable vue/multi-word-component-names -->
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useAuth } from '@/stores/auth'
-import { listTrades, type TradeOut } from '@/services/tradesApi'
-import {
-  getInventorySummary,
-  getInventoryByLocation,
-  type LocationSummaryRow,
-} from '@/services/inventoryApi'
-import { Chart, registerables } from 'chart.js'
-Chart.register(...registerables)
+import { useItemsStore } from '@/stores/items'
+import { api } from '@/services/api'
+import { getItemIconUrl } from '@/services/itemsApi'
 
-/** ---------- Auth / toggles ---------- */
+// ---- Auth / identity -------------------------------------------------------
 const auth = useAuth()
-const isAdmin = computed(() =>
-  Boolean(
-    (auth as any)?.permissions?.['users.admin'] ||
-      (auth as any)?.user?.permissions?.['users.admin'],
-  ),
-)
-const mineOnly = ref(true) // players see their own; admins can flip
-const includeExternal = ref(false) // net worth excludes Import/Export by default
-const asOf = ref(new Date().toISOString())
+if (!auth.token) auth.initFromStorage?.()
 
-const locSummary = ref<LocationSummaryRow[]>([])
-const distRef = ref<HTMLCanvasElement | null>(null)
-let distChart: Chart | null = null
-
-/** datetime-local bridge */
-const asOfLocal = computed({
-  get() {
-    const d = new Date(asOf.value)
-    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
-  },
-  set(v: string) {
-    asOf.value = new Date(v).toISOString()
-  },
-})
-
-/** ---------- Data ---------- */
-const loading = ref(false)
-const errorMsg = ref('')
-const trades = ref<TradeOut[]>([])
-const grandTotal = ref(0)
-const invRows = ref<
-  { item_id: number; item_name: string; qty: number; unit_value: number; total_value: number }[]
->([])
-
-/** ---------- Helpers ---------- */
-function fmtMoney(n: number) {
-  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
-function toLocalDay(iso: string) {
-  const d = new Date(iso)
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
-}
-
-/** ---------- Load ---------- */
-async function load() {
-  loading.value = true
-  errorMsg.value = ''
+function parseJwt<T = any>(t: string): T | null {
   try {
-    const [ts, inv] = await Promise.all([
-      listTrades(),
-      getInventorySummary({
-        as_of: asOf.value,
-        include_external: includeExternal.value,
-        show_zero: false,
-      }),
+    return JSON.parse(atob((t || '').split('.')[1] || ''))
+  } catch {
+    return null
+  }
+}
+const claims = computed(() => parseJwt(auth.token || '') || {})
+const userId = computed<number>(() => Number((claims.value as any).sub || 0))
+const username = computed<string>(() => (claims.value as any).username || 'User')
+const structureId = computed<string>(() => (claims.value as any).structure_id || '—')
+const canCreateEntry = computed(
+  () =>
+    auth.hasRole?.('ADMIN') ||
+    auth.hasRole?.('QUARTERMASTER') ||
+    Boolean((claims.value as any).permissions?.['inventory.admin']),
+)
+
+// ---- Data state -------------------------------------------------------------
+type InvItem = {
+  item_id: number
+  quantity: number
+  price?: number | null
+  value?: number | null
+  item_code?: string | null
+  item_name?: string | null
+}
+type Snapshot = {
+  items: InvItem[]
+  total_value?: number | null
+}
+
+type LedgerRow = {
+  id?: number
+  trade_id?: number
+  timestamp: string
+  item_id: number
+  delta_qty: number
+  movement_reason_code?: string
+}
+
+type TradeRow = { id: number; timestamp: string }
+
+const loading = ref(false)
+const lastUpdated = ref<string>('')
+
+const snapshot = ref<Snapshot>({ items: [], total_value: null })
+const ledger = ref<LedgerRow[]>([])
+const trades = ref<TradeRow[]>([])
+
+const itemsStore = useItemsStore()
+
+// ---- Fetchers ---------------------------------------------------------------
+function nowIso() {
+  return new Date().toISOString()
+}
+
+async function fetchAll() {
+  if (!userId.value) return
+  loading.value = true
+  try {
+    if (!itemsStore.items.length) await itemsStore.refresh()
+
+    const as_of = nowIso()
+
+    // Player snapshot with value as_of now
+    const [snapRes, ledgerRes, tradesRes] = await Promise.all([
+      api.get(`/inventory/player/${userId.value}`, { params: { as_of } }),
+      api.get(`/inventory/player/${userId.value}/ledger`, { params: { limit: 20, offset: 0 } }),
+      api.get('/trades'),
     ])
 
-    locSummary.value = await getInventoryByLocation({
-      as_of: asOf.value,
-      include_external: false,
-    })
-    const myUsername = (auth as any)?.username || (auth as any)?.user?.username
-    const canSeeAll = Boolean((auth as any)?.permissions?.['trades.view_all'])
+    snapshot.value = {
+      items: Array.isArray(snapRes.data?.items) ? snapRes.data.items : snapRes.data || [],
+      total_value: snapRes.data?.total_value ?? null,
+    }
+    ledger.value = Array.isArray(ledgerRes.data) ? ledgerRes.data : []
+    trades.value = Array.isArray(tradesRes.data) ? tradesRes.data : []
 
-    trades.value =
-      mineOnly.value || !canSeeAll ? ts.filter((t) => t.username === myUsername) : ts.slice()
-
-    trades.value.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
-    invRows.value = inv.rows
-    grandTotal.value = inv.grand_total_value
-
-    drawAll()
-  } catch (e) {
-    console.error(e)
-    errorMsg.value = 'Failed to load dashboard data.'
+    lastUpdated.value = new Date().toLocaleString()
   } finally {
     loading.value = false
   }
 }
+onMounted(fetchAll)
 
-/** ---------- Chart.js theme (dark) ---------- */
-Chart.defaults.borderColor = 'rgba(255,255,255,0.15)'
-Chart.defaults.font.family = 'Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif'
+// ---- Derivations / helpers --------------------------------------------------
+const distinctItems = computed(() => snapshot.value.items.length)
 
-/** ---------- Refs for canvases + charts ---------- */
-const netWorthRef = ref<HTMLCanvasElement | null>(null)
-const topItemsRef = ref<HTMLCanvasElement | null>(null)
-const activityRef = ref<HTMLCanvasElement | null>(null)
-let netWorthChart: Chart | null = null
-let topItemsChart: Chart | null = null
-let activityChart: Chart | null = null
+const totalValue = computed(() => {
+  if (typeof snapshot.value.total_value === 'number') return snapshot.value.total_value
+  // fallback if API didn’t compute total_value
+  return snapshot.value.items.reduce((acc, it) => acc + (Number(it.value) || 0), 0)
+})
 
-function upsertChart(
-  inst: Chart | null,
-  el: HTMLCanvasElement | null,
-  type: 'line' | 'bar' | 'doughnut',
-  data: any,
-  options: any,
-): Chart | null {
-  try {
-    if (!el) return inst
-    if (inst) {
-      inst.data = data
-      inst.options = options
-      inst.update()
-      return inst
-    }
-    return new Chart(el.getContext('2d')!, { type, data, options })
-  } catch (e) {
-    console.error('Chart error:', e)
-    return inst
-  }
+const topItems = computed(() => {
+  // sort by value desc; fallback to qty if no value
+  const arr = snapshot.value.items.slice().sort((a, b) => {
+    const va = a.value ?? 0,
+      vb = b.value ?? 0
+    if (vb !== va) return vb - va
+    return (b.quantity || 0) - (a.quantity || 0)
+  })
+  return arr.slice(0, 8)
+})
+
+function itemName(item_id: number, fallback?: string | null): string {
+  const it = itemsStore.byId[item_id]
+  return it?.name || fallback || `#${item_id}`
 }
 
-/** ---------- Build datasets ---------- */
-// 1) Net worth over time (cumulative profit by day)
-const netWorthData = computed(() => {
-  const perDay = new Map<string, number>()
+function valueFmt(n?: number | null): string {
+  if (typeof n !== 'number') return '—'
+  // light format; could localize if you prefer
+  return n.toLocaleString(undefined, { maximumFractionDigits: 2 })
+}
+
+function timeFmt(iso?: string) {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleString()
+}
+
+const lastMovementAt = computed<string>(() => timeFmt(ledger.value[0]?.timestamp))
+
+// entries involving you in last 30 days
+const entries30d = computed<number>(() => {
+  const cutoff = Date.now() - 30 * 24 * 3600 * 1000
+  return trades.value.filter((t) => new Date(t.timestamp).getTime() >= cutoff).length
+})
+
+// Sparkline data (activity by day, last 14 days)
+const activity14 = computed(() => {
+  const days = Array.from({ length: 14 }).map((_, i) => {
+    const d = new Date()
+    d.setDate(d.getDate() - (13 - i))
+    d.setHours(0, 0, 0, 0)
+    return { key: d.getTime(), count: 0, d }
+  })
+  const map = new Map(days.map((x) => [x.key, x]))
+
   for (const t of trades.value) {
-    const day = toLocalDay(t.timestamp as any)
-    const p = Number(t.profit ?? 0)
-    perDay.set(day, (perDay.get(day) || 0) + p)
+    const d = new Date(t.timestamp)
+    d.setHours(0, 0, 0, 0)
+    const k = d.getTime()
+    if (map.has(k)) map.get(k)!.count++
   }
-  const days = Array.from(perDay.keys()).sort()
-  const values: number[] = []
-  let acc = 0
-  for (const d of days) {
-    acc += perDay.get(d) || 0
-    values.push(Number(acc.toFixed(2)))
-  }
-  return { labels: days, values }
+  return days.map((x) => x.count)
 })
+const maxActivity = computed(() => Math.max(1, ...activity14.value))
 
-// 2) Top items by current value (bar)
-const topItemsData = computed(() => {
-  const rows = invRows.value
-    .filter((r) => r.qty !== 0)
-    .sort((a, b) => Math.abs(b.total_value) - Math.abs(a.total_value))
-    .slice(0, 7)
-  return {
-    labels: rows.map((r) => r.item_name),
-    values: rows.map((r) => Number(r.total_value.toFixed(2))),
-  }
-})
-
-// 3) Activity by hour (bar)
-const activityData = computed(() => {
-  const buckets = new Array(24).fill(0)
-  for (const t of trades.value) {
-    const d = new Date(t.timestamp as any)
-    buckets[d.getHours()]++
-  }
-  return { labels: Array.from({ length: 24 }, (_, i) => `${i}:00`), values: buckets }
-})
-
-const distData = computed(() => {
-  const rows = locSummary.value
-    .filter((r) => !r.is_external && Math.abs(r.total_value) > 0)
-    .sort((a, b) => Math.abs(b.total_value) - Math.abs(a.total_value))
-    .slice(0, 10) // top 10 slices (change as you like)
-
-  return {
-    labels: rows.map((r) => r.location_name),
-    values: rows.map((r) => Number(r.total_value.toFixed(2))),
-  }
-})
-
-/** ---------- Draw ---------- */
-function makePalette(n: number): string[] {
-  const base = [
-    '#5c6ac4',
-    '#7280ff',
-    '#8a9aff',
-    '#7aa2f7',
-    '#52c7ea',
-    '#7bd3ff',
-    '#6fb1c6',
-    '#5f9ea0',
-    '#7c6fd6',
-    '#9b7bdc',
-    '#b28fe6',
-    '#8aa2ff',
-  ]
-  const out: string[] = []
-  for (let i = 0; i < n; i++) out.push(base[i % base.length])
-  return out
+function refresh() {
+  fetchAll()
 }
-
-function drawAll() {
-  const styles = getComputedStyle(document.documentElement)
-  const accent = styles.getPropertyValue('--accent')?.trim() || '#5c6ac4'
-  const fg = styles.getPropertyValue('--text-primary')?.trim() || '#ffffff'
-  const grid = 'rgba(255,255,255,0.12)'
-  Chart.defaults.color = fg
-
-  const nw = netWorthData.value
-  netWorthChart = upsertChart(
-    netWorthChart,
-    netWorthRef.value,
-    'line',
-    {
-      labels: nw.labels,
-      datasets: [
-        {
-          label: 'Cumulative Profit',
-          data: nw.values,
-          borderWidth: 2,
-          borderColor: accent,
-          pointRadius: 0,
-          fill: false,
-          tension: 0.25,
-        },
-      ],
-    },
-    {
-      responsive: true,
-      maintainAspectRatio: true,
-      plugins: {
-        legend: { display: false },
-        tooltip: { callbacks: { label: (c: any) => ` ${fmtMoney(c.parsed.y)}` } },
-      },
-      scales: {
-        x: { grid: { color: grid } },
-        y: { grid: { color: grid }, ticks: { callback: (v: any) => fmtMoney(Number(v)) } },
-      },
-    },
-  )
-
-  const ti = topItemsData.value
-  topItemsChart = upsertChart(
-    topItemsChart,
-    topItemsRef.value,
-    'bar',
-    {
-      labels: ti.labels,
-      datasets: [
-        {
-          label: 'Value',
-          data: ti.values,
-          backgroundColor: accent,
-        },
-      ],
-    },
-    {
-      indexAxis: 'y',
-      plugins: {
-        legend: { display: false },
-        tooltip: { callbacks: { label: (c: any) => ` ${fmtMoney(c.parsed.x)}` } },
-      },
-      scales: {
-        x: { grid: { color: grid }, ticks: { callback: (v: any) => fmtMoney(Number(v)) } },
-        y: { grid: { display: false } },
-      },
-    },
-  )
-
-  const act = activityData.value
-  activityChart = upsertChart(
-    activityChart,
-    activityRef.value,
-    'bar',
-    {
-      labels: act.labels,
-      datasets: [
-        {
-          label: 'Trades',
-          data: act.values,
-          backgroundColor: fg,
-          borderWidth: 0,
-        },
-      ],
-    },
-    {
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { grid: { color: grid } },
-        y: { grid: { color: grid }, ticks: { precision: 0 } },
-      },
-    },
-  )
-
-  const dd = distData.value
-  distChart = upsertChart(
-    distChart,
-    distRef.value,
-    'doughnut',
-    {
-      labels: dd.labels,
-      datasets: [
-        {
-          data: dd.values,
-          backgroundColor: makePalette(dd.values.length),
-          borderWidth: 0,
-        },
-      ],
-    },
-    {
-      cutout: '55%',
-      plugins: {
-        legend: { position: 'right', labels: { boxWidth: 12 } },
-        tooltip: {
-          callbacks: {
-            label: (c: any) => ` ${c.label}: ${fmtMoney(c.parsed)}`,
-          },
-        },
-      },
-    },
-  )
-}
-
-/** ---------- Lifecycle ---------- */
-onMounted(load)
-watch([mineOnly, includeExternal, asOf], load)
-onUnmounted(() => {
-  netWorthChart?.destroy()
-  topItemsChart?.destroy()
-  activityChart?.destroy()
-  distChart?.destroy()
-})
 </script>
 
 <template>
-  <div class="p-4">
-    <div class="head">
-      <h2 class="title">Dashboard</h2>
-      <div class="filters">
-        <label class="ctrl">
-          <input type="checkbox" v-model="mineOnly" />
-          <span>Mine only</span>
-        </label>
-        <label class="ctrl">
-          <input type="checkbox" v-model="includeExternal" />
-          <span>Include external (Import/Export)</span>
-        </label>
-        <label class="ctrl">
-          <span>As of</span>
-          <input type="datetime-local" v-model="asOfLocal" />
-        </label>
-        <button class="btn" @click="load">Refresh</button>
+  <div class="p-4 space-y-4">
+    <!-- Header -->
+    <div class="flex items-center gap-3">
+      <div>
+        <div class="text-xl">Welcome, {{ username }}</div>
+        <div class="text-xs opacity-70">Structure: {{ structureId }}</div>
+      </div>
+
+      <div class="ml-auto flex items-center gap-2">
+        <button class="btn" :disabled="loading" @click="refresh">
+          {{ loading ? 'Refreshing…' : 'Refresh' }}
+        </button>
+        <div class="text-xs opacity-70">Last updated: {{ lastUpdated || '—' }}</div>
       </div>
     </div>
 
-    <div v-if="errorMsg" class="err">{{ errorMsg }}</div>
-
-    <div class="kpis">
+    <!-- KPIs -->
+    <div class="grid gap-3 grid-cols-1 md:grid-cols-4">
       <div class="kpi">
-        <div class="label">Net Worth (as of)</div>
-        <div class="value">{{ fmtMoney(grandTotal) }}</div>
+        <div class="kpi__label">My inventory value</div>
+        <div class="kpi__value">{{ valueFmt(totalValue) }}</div>
+        <div class="kpi__hint">As of now</div>
       </div>
       <div class="kpi">
-        <div class="label">Total Trades</div>
-        <div class="value">{{ trades.length.toLocaleString() }}</div>
+        <div class="kpi__label">Distinct items</div>
+        <div class="kpi__value">{{ distinctItems }}</div>
+        <div class="kpi__hint">Currently held</div>
       </div>
       <div class="kpi">
-        <div class="label">Active Items</div>
-        <div class="value">{{ invRows.length.toLocaleString() }}</div>
+        <div class="kpi__label">Entries (30d)</div>
+        <div class="kpi__value">{{ entries30d }}</div>
+        <div class="kpi__hint">Involving you</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi__label">Last movement</div>
+        <div class="kpi__value text-sm">{{ lastMovementAt }}</div>
+        <div class="kpi__hint">From your ledger</div>
       </div>
     </div>
 
-    <div class="grid charts-70">
-      <div class="card chart">
-        <div class="card-title">Cumulative Profit</div>
-        <canvas ref="netWorthRef"></canvas>
+    <!-- Row: Inventory & Activity -->
+    <div class="grid gap-3 grid-cols-1 lg:grid-cols-3">
+      <!-- My Inventory -->
+      <div class="card lg:col-span-2">
+        <div class="flex items-center justify-between mb-2">
+          <div class="text-base font-medium">My Inventory (top by value)</div>
+          <RouterLink
+            to="/inventory?tab=players"
+            class="text-xs opacity-80 hover:opacity-100 underline"
+          >
+            Open Inventory workspace
+          </RouterLink>
+        </div>
+
+        <div v-if="!snapshot.items.length && !loading" class="empty-row">
+          No items in your inventory.
+        </div>
+
+        <div v-else class="inv-table">
+          <div class="inv-head">
+            <div>Item</div>
+            <div class="text-right">Qty</div>
+            <div class="text-right">Unit</div>
+            <div class="text-right">Value</div>
+          </div>
+
+          <div v-for="it in topItems" :key="it.item_id" class="inv-row">
+            <div class="flex items-center gap-2 min-w-0">
+              <img
+                class="icon"
+                :src="getItemIconUrl(it.item_id)"
+                alt=""
+                @error="($event.target as HTMLImageElement).style.display = 'none'"
+              />
+              <div class="truncate">
+                <div class="font-medium truncate">{{ itemName(it.item_id, it.item_name) }}</div>
+                <div class="text-xs opacity-60 mono">#{{ it.item_id }}</div>
+              </div>
+            </div>
+            <div class="text-right">{{ it.quantity }}</div>
+            <div class="text-right">{{ valueFmt(it.price ?? null) }}</div>
+            <div class="text-right">
+              {{ valueFmt(it.value ?? (it.price || 0) * (it.quantity || 0)) }}
+            </div>
+          </div>
+        </div>
       </div>
 
-      <div class="card chart">
-        <div class="card-title">Top Holdings by Value</div>
-        <canvas ref="topItemsRef"></canvas>
-      </div>
+      <!-- Activity (sparkline & quick facts) -->
+      <div class="card">
+        <div class="text-base font-medium mb-2">Your Activity (last 14 days)</div>
 
-      <div class="card chart">
-        <div class="card-title">Activity by Hour</div>
-        <canvas ref="activityRef"></canvas>
-      </div>
-      <div class="card chart">
-        <div class="card-title">Value by Location (Internal)</div>
-        <canvas ref="distRef"></canvas>
+        <svg viewBox="0 0 140 40" preserveAspectRatio="none" class="w-full h-16">
+          <polyline
+            :points="
+              activity14
+                .map((c, i) => `${(i / 13) * 140},${40 - (c / maxActivity) * 36 - 2}`)
+                .join(' ')
+            "
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          />
+        </svg>
+
+        <div class="text-xs opacity-70 mt-1">Bars represent daily entries you’re involved in.</div>
+
+        <div class="mt-3 text-xs">
+          <RouterLink to="/trades" class="underline">See all entries</RouterLink>
+          <span v-if="canCreateEntry" class="opacity-60"> · </span>
+          <RouterLink v-if="canCreateEntry" to="/create-trade" class="underline"
+            >Create entry</RouterLink
+          >
+        </div>
       </div>
     </div>
 
-    <div v-if="loading" class="loading">Loading…</div>
+    <!-- Recent Activity feed -->
+    <div class="card">
+      <div class="flex items-center justify-between mb-2">
+        <div class="text-base font-medium">Recent Activity</div>
+        <div class="text-xs opacity-70">Latest from your player ledger</div>
+      </div>
+
+      <div v-if="!ledger.length && !loading" class="empty-row">No recent movements yet.</div>
+
+      <div v-else class="feed">
+        <div
+          v-for="row in ledger"
+          :key="row.timestamp + '-' + (row.trade_id || 0) + '-' + row.item_id"
+          class="feed-row"
+        >
+          <div class="feed-time">{{ timeFmt(row.timestamp) }}</div>
+          <div class="feed-main">
+            <span class="mono">{{ row.delta_qty >= 0 ? '+' : '' }}{{ row.delta_qty }}</span>
+            <span> of </span>
+            <strong>{{ itemName(row.item_id) }}</strong>
+            <span v-if="row.movement_reason_code" class="chip">{{ row.movement_reason_code }}</span>
+          </div>
+          <div class="feed-link">
+            <RouterLink v-if="row.trade_id" :to="`/trades#id-${row.trade_id}`" class="underline"
+              >Entry #{{ row.trade_id }}</RouterLink
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Your Entries list -->
+    <div class="card">
+      <div class="flex items-center justify-between mb-2">
+        <div class="text-base font-medium">Your Entries</div>
+        <div class="text-xs opacity-70">
+          Includes entries you created or where you are a party in at least one line.
+        </div>
+      </div>
+
+      <div v-if="!trades.length && !loading" class="empty-row">You have no entries yet.</div>
+
+      <div v-else class="trows">
+        <div class="trow head">
+          <div>ID</div>
+          <div>When</div>
+        </div>
+        <div v-for="t in trades.slice(0, 10)" :key="t.id" class="trow">
+          <div>#{{ t.id }}</div>
+          <div>{{ timeFmt(t.timestamp) }}</div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-.title {
+.text-xl {
   font-size: 1.25rem;
 }
-.filters {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  flex-wrap: wrap;
+
+.card {
+  background: var(--bg-secondary);
+  padding: 12px;
+  border-radius: 12px;
 }
-.ctrl {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  color: var(--text-muted);
-}
-.ctrl input[type='datetime-local'] {
-  padding: 6px 8px;
-  border-radius: 8px;
-  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-}
+
 .btn {
   padding: 8px 12px;
   border-radius: 10px;
   background: var(--bg-tertiary);
   color: var(--text-primary);
-  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+  border: 1px solid var(--bg-tertiary);
   cursor: pointer;
 }
 
-.kpis {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-  margin-bottom: 10px;
-}
+/* KPIs */
 .kpi {
   background: var(--bg-secondary);
   border-radius: 12px;
-  padding: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 12px;
 }
-.kpi .label {
+.kpi__label {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+.kpi__value {
+  font-size: 1.2rem;
+  margin-top: 2px;
+}
+.kpi__hint {
+  font-size: 0.7rem;
+  opacity: 0.7;
+}
+
+/* Inventory table */
+.inv-head,
+.inv-row {
+  display: grid;
+  grid-template-columns: 2.4fr 0.8fr 0.8fr 1fr;
+  gap: 8px;
+  align-items: center;
+}
+.inv-head {
   font-size: 0.85rem;
-  color: var(--text-muted);
+  color: var(--text-secondary);
+  margin-bottom: 6px;
 }
-.kpi .value {
-  font-size: 1.25rem;
-  font-weight: 700;
+.icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  object-fit: cover;
+  border: 1px solid var(--bg-tertiary);
 }
 
-.grid {
+/* Feed */
+.feed {
   display: grid;
-  gap: 12px;
-  grid-template-columns: 1fr;
+  gap: 8px;
 }
-@media (min-width: 960px) {
-  .grid {
-    grid-template-columns: 1.2fr 1fr;
-  }
-}
-.card {
+.feed-row {
+  display: grid;
+  grid-template-columns: 1.2fr 2fr 1fr;
+  gap: 8px;
+  align-items: center;
   background: var(--bg-secondary);
-  border-radius: 12px;
-  padding: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--bg-tertiary);
+  border-radius: 10px;
+  padding: 8px;
 }
-.card-title {
-  margin-bottom: 6px;
-  color: var(--text-muted);
+.feed-time {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
 }
-
-.loading {
-  padding: 16px;
-  color: var(--text-muted);
-}
-.err {
-  color: #ff9494;
-  margin-bottom: 8px;
+.chip {
+  font-size: 0.65rem;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  margin-left: 6px;
 }
 
-/* make the charts section only 70% wide, centered */
-.grid.charts-70 {
-  width: 70%;
-  margin-inline: auto;
+/* Entries table */
+.trows {
   display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.trow {
+  display: grid;
+  grid-template-columns: 0.6fr 1.6fr;
+  gap: 8px;
+  align-items: center;
+  background: var(--bg-secondary);
+  border: 1px solid var(--bg-tertiary);
+  border-radius: 10px;
+  padding: 8px;
+}
+.trow.head {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  padding: 0;
 }
 
-/* on small screens, stack */
-@media (max-width: 960px) {
-  .grid.charts-70 {
-    width: 100%;
-    grid-template-columns: 1fr;
-  }
+.empty-row {
+  padding: 12px;
+  text-align: center;
+  color: var(--text-secondary);
+  border: 1px dashed var(--bg-tertiary);
+  border-radius: 10px;
 }
 
-/* each chart card occupies its grid cell and provides height for the canvas */
-.card.chart {
-  display: flex;
-  flex-direction: column;
-  /* choose one of these height strategies */
-
-  /* A) square cards */
-  aspect-ratio: 1 / 1;
-
-  /* OR B) 16:9 cards (comment A and use this) */
-  /* aspect-ratio: 16 / 9; */
-
-  min-height: 220px; /* guard for short viewports */
-}
-
-/* let the canvas fill the remaining space */
-.card.chart .card-title {
-  margin-bottom: 6px;
+/* mono font */
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
 }
 </style>

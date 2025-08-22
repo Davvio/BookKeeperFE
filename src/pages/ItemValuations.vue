@@ -151,7 +151,7 @@ function itemName(id: number | null): string {
     <div v-if="errorMsg" class="alert err">{{ errorMsg }}</div>
     <div v-if="successMsg" class="alert ok">{{ successMsg }}</div>
 
-    <div class="card mb-4" v-if="canEditValuations">
+    <div class="card mb-4">
       <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div>
           <label class="label">Item</label>
@@ -164,18 +164,18 @@ function itemName(id: number | null): string {
           />
         </div>
 
-        <div>
+        <div class="" v-if="canEditValuations">
           <label class="label">New value</label>
           <input class="input" v-model="valueInput" inputmode="decimal" placeholder="e.g. 12.5" />
         </div>
 
-        <div>
+        <div class="" v-if="canEditValuations">
           <label class="label">Effective from (optional)</label>
           <input class="input" type="datetime-local" v-model="effectiveInput" />
         </div>
       </div>
 
-      <div class="mt-3">
+      <div class="mt-3" v-if="canEditValuations">
         <button
           class="btn primary"
           :disabled="saving || selectedItemId === null"

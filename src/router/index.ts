@@ -42,14 +42,8 @@ const routes: RouteRecordRaw[] = [
       },
       {
         path: 'inventory',
-        component: () => import('@/pages/Inventory.vue'),
+        component: () => import('@/pages/InventoryWorkspace.vue'),
         meta: { requiresAuth: true },
-      },
-
-      {
-        path: '/inventory/players',
-        component: () => import('@/pages/PlayerInventory.vue'),
-        meta: { title: 'Player Inventory' },
       },
 
       // Catalogs & Admin

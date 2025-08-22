@@ -19,6 +19,22 @@ import { listMovementReasons, type MovementReason } from '@/services/movementRea
 import { getItemIconUrl } from '@/services/itemsApi'
 import { useMovementReasonsStore } from '../stores/movementReasons'
 import PartySelect from '@/components/PartySelect.vue'
+import { useAuth } from '@/stores/auth'
+
+const auth = useAuth()
+function hasPerm(k: string) {
+  try {
+    const json = JSON.parse(atob((auth.token || '').split('.')[1] || '')) || {}
+    return !!json.permissions?.[k]
+  } catch {
+    return false
+  }
+}
+const canCreateEntry = computed(
+  () => auth.hasRole?.('ADMIN') || auth.hasRole?.('QUARTERMASTER') || hasPerm('inventory.admin'),
+)
+
+const createdId = ref<number | null>(null)
 
 type Party = 'location' | 'user'
 const partyOptions = [
@@ -222,7 +238,8 @@ async function submit() {
   try {
     console.log('payload lines:', JSON.stringify(payload.lines))
     const res = await createTrade(payload)
-    successMsg.value = `Trade #${res.id} saved. Profit: ${res.profit === null ? '—' : res.profit}`
+    createdId.value = res.id
+    successMsg.value = `Entry #${res.id} saved. Profit: ${res.profit === null ? '—' : res.profit}`
     rows.value = [
       {
         item_id: null,
@@ -240,7 +257,7 @@ async function submit() {
     timestamp.value = new Date().toISOString()
   } catch (e: unknown) {
     const ax = e as AxiosError<{ detail?: string }>
-    errorMsg.value = ax?.response?.data?.detail || 'Failed to save trade.'
+    errorMsg.value = ax?.response?.data?.detail || 'Failed to save entry.'
   } finally {
     saving.value = false
   }
@@ -250,7 +267,19 @@ async function submit() {
 <template>
   <div class="p-4">
     <div class="mb-3 flex items-center">
-      <h2 class="text-xl mb-4">Create Trade</h2>
+      <h2 class="text-xl mb-4">Create Entry</h2>
+      <!-- Success banner -->
+      <div v-if="createdId" class="alert ok">
+        Entry created (#{{ createdId }}) —
+        <RouterLink :to="`/trades#id-${createdId}`">View in All Entries</RouterLink>
+      </div>
+      <!-- No access card -->
+      <div v-if="!canCreateEntry" class="card">
+        <div class="text-sm">
+          Creating entries is limited to <strong>Quartermasters</strong> and
+          <strong>Admins</strong>. If you think this is a mistake, contact a Quartermaster.
+        </div>
+      </div>
       <button
         class="btn--sm ml-3"
         @click="showHeader = !showHeader"
@@ -369,7 +398,7 @@ async function submit() {
 
     <div class="mt-4 flex gap-2 items-center">
       <button class="btn primary" :disabled="saving || !canSubmit" @click="submit">
-        Save Trade
+        Save Entry
       </button>
       <span v-if="saving">Saving…</span>
       <span v-if="successMsg" class="ok">{{ successMsg }}</span>
@@ -489,5 +518,24 @@ async function submit() {
 }
 .lines-row + .lines-row {
   margin-top: 8px;
+}
+
+.alert.ok {
+  background: #203a2f;
+  color: #9ee0bf;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+.card {
+  background: var(--bg-secondary);
+  padding: 12px;
+  border-radius: 12px;
+}
+.text-xl {
+  font-size: 1.25rem;
+}
+.btn.primary {
+  background: var(--accent);
+  color: var(--bg-primary);
 }
 </style>
