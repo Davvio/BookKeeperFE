@@ -1,3 +1,4 @@
+<!-- eslint-disable @typescript-eslint/no-explicit-any -->
 <!-- eslint-disable @typescript-eslint/no-unused-vars -->
 <!-- src/pages/CommsPage.vue -->
 <script setup lang="ts">
@@ -8,12 +9,15 @@ import OutboxView from '@/components/comms/OutboxView.vue'
 import PartyInspector from '@/components/comms/PartyInspector.vue'
 import MessageComposer from '@/components/comms/MessageComposer.vue'
 import PartyEditor from '@/components/comms/PartyEditor.vue'
+import { useComms } from '@/stores/comms'
 
 import { ref, computed } from 'vue'
 import { useAuth } from '@/stores/auth'
 
 const auth = useAuth()
 if (!auth.token) auth.initFromStorage?.()
+
+const comms = useComms()
 
 function hasPerm(key: string) {
   try {
@@ -28,6 +32,11 @@ const isAdmin = computed(() => auth.hasRole?.('ADMIN') || hasPerm('users.admin')
 // modal state + a key to force PartyList to reload after creating
 const createOpen = ref(false)
 const partyRefreshKey = ref(0)
+
+function selectBroadcast() {
+  comms.selectedPartyId = -1 as any
+  comms.selectedUserId = null
+}
 
 function onPartyCreated(/*party?: any*/) {
   createOpen.value = false
@@ -54,7 +63,18 @@ const inboxRef = ref<InstanceType<typeof InboxView> | null>(null)
           </button>
         </div>
 
-        <PartyList class="bg-[var(--bg-secondary)] rounded-xl p-3" :key="partyRefreshKey" />
+        <PartyList class="bg-[var(--bg-secondary)] rounded-xl p-3" :key="partyRefreshKey">
+          <template #actions>
+            <button
+              v-if="isAdmin"
+              class="px-2 py-1 text-xs rounded bg-[var(--bg-tertiary)] hover:bg-[var(--bg-secondary)]"
+              title="Broadcast to everyone in your structure"
+              @click="selectBroadcast"
+            >
+              Broadcast
+            </button>
+          </template>
+        </PartyList>
       </div>
       <PlayerList class="bg-[var(--bg-secondary)] rounded-xl p-3" />
     </aside>

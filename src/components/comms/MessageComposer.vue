@@ -1,3 +1,4 @@
+<!-- eslint-disable @typescript-eslint/no-unused-vars -->
 <!-- eslint-disable @typescript-eslint/no-explicit-any -->
 <!-- src/components/comms/MessageComposer.vue -->
 <script setup lang="ts">
@@ -6,6 +7,7 @@ import { useComms } from '@/stores/comms'
 import { useAuth } from '@/stores/auth'
 import { MESSAGE_KINDS, type MessageKind } from '@/constants/messages'
 import { sendOutboxMessage } from '@/services/messagesApi'
+import { broadcastMessage } from '@/services/messagesApi'
 
 const comms = useComms()
 const auth = useAuth()
@@ -38,8 +40,19 @@ const canSend = computed(() => {
 const kind = ref<MessageKind>('CHAT')
 const text = ref('')
 
-// Target display
+function parseJwt<T = any>(t: string): T | null {
+  try {
+    return JSON.parse(atob((t || '').split('.')[1] || ''))
+  } catch {
+    return null
+  }
+}
+
+const claims = computed(() => parseJwt(auth.token || '') || {})
+const structureId = computed(() => (claims.value as any).structure_id || '—')
+
 const targetLabel = computed(() => {
+  if (comms.selectedPartyId === -1) return `Broadcast (${structureId.value})`
   if (comms.selectedPartyId) return `Party #${comms.selectedPartyId}`
   if (comms.selectedUserId) return `Player #${comms.selectedUserId}`
   return 'No target selected'
@@ -47,17 +60,45 @@ const targetLabel = computed(() => {
 
 async function send() {
   if (!canSend.value) return
-  if (!text.value.trim()) return
+  const msg = text.value.trim()
+  if (!msg) return
+
+  // --- Broadcast (sentinel partyId === -1) ---
+  if (comms.selectedPartyId === -1) {
+    if (!confirm(`Send this ${kind.value} to everyone in ${structureId.value}?`)) return
+    try {
+      await broadcastMessage({
+        text: msg,
+        kind: kind.value,
+        // include these if you expose them in the UI:
+        // meta: null,
+        // deliver_after: null,
+        // expires_at: null,
+        // requires_ack: false,
+        // priority: 'NORMAL',
+      })
+      text.value = ''
+      alert('Broadcast sent')
+    } catch {
+      alert('Failed to send broadcast')
+    }
+    return
+  }
+
+  // --- Regular party/player send ---
   if (!comms.selectedPartyId && !comms.selectedUserId) return
 
-  const payload: any = { text: text.value.trim(), kind: kind.value }
+  const payload: any = { text: msg, kind: kind.value }
   if (comms.selectedPartyId) payload.to_party_ids = [comms.selectedPartyId]
   if (comms.selectedUserId) payload.to_user_ids = [comms.selectedUserId]
 
-  await sendOutboxMessage(payload)
-  text.value = ''
-  // (Optional) Emit toast; for now, a minimal feedback:
-  alert('Message sent')
+  try {
+    await sendOutboxMessage(payload)
+    text.value = ''
+    alert('Message sent')
+  } catch {
+    alert('Failed to send message')
+  }
 }
 </script>
 

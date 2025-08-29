@@ -103,3 +103,20 @@ export async function sendOutboxMessage(payload: OutboxCreate) {
   const { data } = await api.post('/messages/outbox', payload)
   return data
 }
+
+export type BroadcastIn = {
+  text: string
+  kind: 'CHAT' | 'TITLE' | 'ACTIONBAR' | 'BOSSBAR'
+  meta?: Record<string, any> | null
+  deliver_after?: string | null
+  expires_at?: string | null
+  requires_ack?: boolean
+  priority?: 'LOW' | 'NORMAL' | 'HIGH'
+}
+
+export async function broadcastMessage(
+  body: BroadcastIn,
+): Promise<{ message_id: number; recipients: number }> {
+  const { data } = await api.post('/messages/broadcast', body)
+  return data
+}
