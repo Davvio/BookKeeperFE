@@ -1,6 +1,8 @@
 <!-- eslint-disable vue/multi-word-component-names -->
+<!-- eslint-disable @typescript-eslint/no-unused-vars -->
+<!-- eslint-disable vue/multi-word-component-names -->
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import {
   getInventorySummary,
   getItemByLocation,
@@ -11,6 +13,7 @@ import {
   type LocationSummaryRow,
   type LocationByItemRow,
 } from '@/services/inventoryApi'
+import InventoryAeGrid from '@/components/InventoryAeGrid.vue'
 
 const tab = ref<'items' | 'locations'>('items')
 const includeExternal = ref(false) // default: exclude externals for net worth
@@ -18,6 +21,38 @@ const asOf = ref(new Date().toISOString())
 
 const loading = ref(false)
 const errorMsg = ref('')
+
+const itemsView = ref<'table' | 'grid'>('table')
+watch(itemsView, () => load())
+
+const itemSearch = ref('')
+
+const filteredItemsByName = computed(() => {
+  const base = Array.isArray(filteredItems?.value)
+    ? filteredItems.value
+    : Array.isArray(summary?.value)
+      ? summary.value
+      : []
+  const q = itemSearch.value.trim().toLowerCase()
+  if (!q) return base
+  return base.filter((r) =>
+    String(r.item_name || '')
+      .toLowerCase()
+      .includes(q),
+  )
+})
+
+const aeSortedFiltered = computed(() => {
+  const rows = Array.isArray(summary?.value) ? summary.value.slice() : []
+  rows.sort((a, b) => b.qty - a.qty) // qty desc
+  const q = itemSearch.value.trim().toLowerCase()
+  if (!q) return rows
+  return rows.filter((r) =>
+    String(r.item_name || '')
+      .toLowerCase()
+      .includes(q),
+  )
+})
 
 // Data
 const summary = ref<InventoryItemRow[]>([])
@@ -31,6 +66,13 @@ const loadingItem = ref<number | null>(null)
 const locSummary = ref<LocationSummaryRow[]>([])
 const byLocCache = ref(new Map<number, LocationByItemRow[]>())
 const loadingLoc = ref<number | null>(null)
+
+const aeSorted = computed(() => {
+  // grid ignores the text search and sorts strictly by qty desc
+  const rows = summary.value.slice()
+  rows.sort((a, b) => b.qty - a.qty)
+  return rows
+})
 
 // Search text
 const q = ref('')
@@ -79,9 +121,10 @@ async function load() {
   loading.value = true
   try {
     if (tab.value === 'items') {
+      const include = itemsView.value === 'grid' ? false : includeExternal.value
       const data = await getInventorySummary({
         as_of: asOf.value,
-        include_external: includeExternal.value,
+        include_external: include,
         show_zero: false, // change to true if you want zeros listed
       })
       summary.value = data.rows
@@ -145,24 +188,59 @@ onMounted(load)
   <div class="p-4">
     <div class="toolbar">
       <div class="tabs">
-        <button :class="['tab', tab === 'items' && 'active']" @click="switchTab('items')">
+        <button class="tab" :class="[tab === 'items' && 'active']" @click="switchTab('items')">
           By Item
         </button>
-        <button :class="['tab', tab === 'locations' && 'active']" @click="switchTab('locations')">
+        <button
+          class="tab"
+          :class="[tab === 'locations' && 'active']"
+          @click="switchTab('locations')"
+        >
           By Location
         </button>
       </div>
 
       <div class="filters">
+        <template v-if="tab === 'items'">
+          <div class="btn-group">
+            <button
+              class="btn"
+              :class="{ active: itemsView === 'table' }"
+              @click="itemsView = 'table'"
+            >
+              Table
+            </button>
+            <button
+              class="btn"
+              :class="{ active: itemsView === 'grid' }"
+              @click="itemsView = 'grid'"
+            >
+              AE Grid
+            </button>
+          </div>
+
+          <input
+            v-model.trim="itemSearch"
+            class="search"
+            type="search"
+            placeholder="Search item name…"
+          />
+
+          <!-- Hide these on grid -->
+          <template v-if="itemsView === 'table'">
+            <label class="ctrl">
+              <input type="checkbox" v-model="includeExternal" @change="load" />
+              <span>Include external (Import/Export)</span>
+            </label>
+            <input v-model="q" class="search" type="search" placeholder="Search items/locations…" />
+          </template>
+        </template>
+
+        <!-- Shared time + refresh still useful in both views -->
         <label class="ctrl">
           <span>As of</span>
           <input type="datetime-local" v-model="asOfLocal" />
         </label>
-        <label class="ctrl">
-          <input type="checkbox" v-model="includeExternal" @change="load" />
-          <span>Include external (Import/Export)</span>
-        </label>
-        <input v-model="q" class="search" type="search" placeholder="Search items/locations…" />
         <button class="btn" @click="load">Refresh</button>
       </div>
     </div>
@@ -171,67 +249,72 @@ onMounted(load)
 
     <!-- By Item -->
     <div v-if="tab === 'items'" class="card">
-      <div class="tr th">
-        <div class="cell exp"></div>
-        <div class="cell item">Item</div>
-        <div class="cell qty">Qty</div>
-        <div class="cell unit">Unit</div>
-        <div class="cell value">Value</div>
-        <!-- was Total -->
-      </div>
-
       <div v-if="loading" class="loading">Loading…</div>
 
       <template v-else>
-        <div v-for="row in filteredItems" :key="row.item_id" class="group">
-          <details
-            class="row"
-            @toggle="($event.target as HTMLDetailsElement).open && expandItem(row.item_id)"
-          >
-            <summary class="tr">
-              <div class="cell exp">▸</div>
-              <div class="cell item">{{ row.item_name }}</div>
-              <div class="cell qty">{{ fmtQty(row.qty) }}</div>
-              <div class="cell unit">{{ fmtMoney(row.unit_value) }}</div>
-              <div class="cell value">{{ fmtMoney(row.total_value) }}</div>
-            </summary>
+        <!-- AE GRID VIEW -->
+        <InventoryAeGrid v-if="itemsView === 'grid'" :rows="aeSortedFiltered" />
 
-            <div class="expanded">
-              <div class="tr th sub">
-                <div class="cell exp"></div>
-                <div class="cell loc">Location</div>
-                <div class="cell qty">Qty</div>
-                <div class="cell unit"></div>
-                <div class="cell value">Value</div>
-              </div>
+        <!-- TABLE VIEW (original UI) -->
+        <template v-else>
+          <div class="tr th">
+            <div class="cell exp"></div>
+            <div class="cell item">Item</div>
+            <div class="cell qty">Qty</div>
+            <div class="cell unit">Unit</div>
+            <div class="cell value">Value</div>
+          </div>
 
-              <div v-if="loadingItem === row.item_id" class="loading">Loading item…</div>
-              <div v-else>
-                <div
-                  v-for="loc in byItemCache.get(row.item_id) || []"
-                  :key="loc.location_id"
-                  class="tr subrow"
-                >
+          <div v-for="row in filteredItemsByName" :key="row.item_id" class="group">
+            <details
+              class="row"
+              @toggle="($event.target as HTMLDetailsElement).open && expandItem(row.item_id)"
+            >
+              <summary class="tr">
+                <div class="cell exp">▸</div>
+                <div class="cell item">{{ row.item_name }}</div>
+                <div class="cell qty">{{ fmtQty(row.qty) }}</div>
+                <div class="cell unit">{{ fmtMoney(row.unit_value) }}</div>
+                <div class="cell value">{{ fmtMoney(row.total_value) }}</div>
+              </summary>
+
+              <div class="expanded">
+                <div class="tr th sub">
                   <div class="cell exp"></div>
-                  <div class="cell loc">
-                    <span v-if="loc.is_external" class="chip warn"
-                      >{{ loc.location_name }} ({{ loc.external_kind }})</span
-                    >
-                    <span v-else>{{ loc.location_name }}</span>
-                  </div>
-                  <div class="cell qty">{{ fmtQty(loc.qty) }}</div>
+                  <div class="cell loc">Location</div>
+                  <div class="cell qty">Qty</div>
                   <div class="cell unit"></div>
-                  <div class="cell value">{{ fmtMoney(loc.value) }}</div>
+                  <div class="cell value">Value</div>
+                </div>
+
+                <div v-if="loadingItem === row.item_id" class="loading">Loading item…</div>
+                <div v-else>
+                  <div
+                    v-for="loc in byItemCache.get(row.item_id) || []"
+                    :key="loc.location_id"
+                    class="tr subrow"
+                  >
+                    <div class="cell exp"></div>
+                    <div class="cell loc">
+                      <span v-if="loc.is_external" class="chip warn">
+                        {{ loc.location_name }} ({{ loc.external_kind }})
+                      </span>
+                      <span v-else>{{ loc.location_name }}</span>
+                    </div>
+                    <div class="cell qty">{{ fmtQty(loc.qty) }}</div>
+                    <div class="cell unit"></div>
+                    <div class="cell value">{{ fmtMoney(loc.value) }}</div>
+                  </div>
                 </div>
               </div>
-            </div>
-          </details>
-        </div>
+            </details>
+          </div>
 
-        <div class="grand">
-          <div>Grand total (net worth)</div>
-          <div class="money">{{ fmtMoney(grandTotal) }}</div>
-        </div>
+          <div class="grand">
+            <div>Grand total (net worth)</div>
+            <div class="money">{{ fmtMoney(grandTotal) }}</div>
+          </div>
+        </template>
       </template>
     </div>
 
@@ -475,5 +558,23 @@ onMounted(load)
 
 .expanded {
   background: var(--bg-secondary);
+}
+
+.btn-group {
+  display: inline-flex;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.btn-group .btn {
+  border: 0;
+  border-right: 1px solid var(--border-subtle);
+}
+.btn-group .btn:last-child {
+  border-right: 0;
+}
+.btn-group .btn.active {
+  background: var(--accent);
+  color: var(--bg-primary);
 }
 </style>
