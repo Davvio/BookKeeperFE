@@ -3,6 +3,8 @@ import { useAuth } from '@/stores/auth'
 
 const routes: RouteRecordRaw[] = [
   { path: '/login', component: () => import('@/pages/LoginPage.vue') },
+  { path: '/magic-login/:token', component: () => import('@/pages/MagicLogin.vue') },
+  { path: '/join-structure', component: () => import('@/pages/JoinStructure.vue') },
 
   {
     path: '/',
@@ -23,6 +25,11 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true },
       },
       { path: 'comms', component: () => import('../pages/CommsPage.vue') },
+      {
+        path: 'nations',
+        component: () => import('@/pages/Nations.vue'),
+        meta: { requiresAuth: true },
+      },
 
       {
         path: 'locations',
@@ -56,6 +63,22 @@ const routes: RouteRecordRaw[] = [
           { path: 'users-roles', component: () => import('@/pages/AdminUsersRoles.vue') },
           { path: 'structure', component: () => import('@/pages/StructureValuta.vue') },
           {
+            path: 'structure-codes',
+            component: () => import('@/pages/admin/StructureManagement.vue'),
+          },
+          {
+            path: 'player-management',
+            component: () => import('@/pages/admin/PlayerManagement.vue'),
+          },
+          {
+            path: 'unassigned-players',
+            component: () => import('@/pages/admin/UnassignedPlayers.vue'),
+          },
+          {
+            path: 'guest-requests',
+            component: () => import('@/pages/admin/GuestManagement.vue'),
+          },
+          {
             path: 'movement-reasons',
             component: () => import('@/pages/AdminMovementReasons.vue'),
           },
@@ -79,13 +102,33 @@ router.beforeEach((to, from, next) => {
   const needsAuth = to.meta?.requiresAuth || to.meta?.requiresAdmin
   const needsAdmin = to.meta?.requiresAdmin
 
+  // Check authentication
   if (needsAuth && (!auth.isAuthenticated || auth.isExpired)) {
     const redirect = encodeURIComponent(to.fullPath)
     return next({ path: '/login', query: { redirect } })
   }
+
+  // Check admin permissions
   if (needsAdmin && !auth.isAdmin) {
     return next({ path: '/' })
   }
+
+  // Guest users can only access account settings, join structure, and nations page
+  // Block structure-specific pages for guests
+  const allowedPathsForGuests = [
+    '/login',
+    '/magic-login',
+    '/join-structure',
+    '/nations',
+    '/profile', // If you add a profile page later
+  ]
+  const isAllowedPathForGuest = allowedPathsForGuests.some(p => to.path.startsWith(p))
+
+  if (auth.isAuthenticated && auth.isGuest && !isAllowedPathForGuest) {
+    // Redirect guests to nations page to choose/wait for approval
+    return next({ path: '/nations' })
+  }
+
   next()
 })
 

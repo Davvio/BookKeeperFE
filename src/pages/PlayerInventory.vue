@@ -3,6 +3,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, computed } from 'vue'
 import BkSelect from '@/components/BkSelect.vue'
+import InventoryAeGrid from '@/components/InventoryAeGrid.vue'
 import { useAuth } from '@/stores/auth'
 
 import { useItemsStore } from '@/stores/items'
@@ -11,6 +12,7 @@ import { useMovementReasonsStore } from '@/stores/movementReasons'
 import { listUsersLite, type UserLite } from '@/services/usersApi'
 import { getItemIconUrl } from '@/services/itemsApi'
 import type { Item } from '@/services/itemsApi'
+import type { InventoryItemRow } from '@/services/inventoryApi'
 
 import {
   getPlayerInventory,
@@ -60,6 +62,7 @@ const q = ref('') // text filter (item name)
 const selUserId = ref<number | null>(null)
 const selItemId = ref<number | null>(null) // optional item filter
 const asOfDate = ref<string>('') // YYYY-MM-DD
+const itemsView = ref<'table' | 'grid'>('table')
 
 /* ---------- load ---------- */
 async function loadSnapshot() {
@@ -115,6 +118,30 @@ const viewItems = computed(() => {
 
 const totalShown = computed(() => viewItems.value.length)
 
+// Transform player inventory items to InventoryItemRow format for AE Grid
+const aeSortedFiltered = computed(() => {
+  const items = snap.value?.items ?? []
+  const term = q.value.trim().toLowerCase()
+
+  // Transform to InventoryItemRow format
+  const transformed: InventoryItemRow[] = items.map((it) => ({
+    item_id: it.item_id,
+    item_name: it.name,
+    qty: it.quantity,
+    unit_value: it.price ?? 0,
+    total_value: it.value ?? 0,
+  }))
+
+  // Apply filters
+  let filtered = term ? transformed.filter((it) => it.item_name.toLowerCase().includes(term)) : transformed
+  filtered = selItemId.value ? filtered.filter((it) => it.item_id === selItemId.value) : filtered
+
+  // Sort by quantity descending (like in Inventory.vue)
+  filtered.sort((a, b) => b.qty - a.qty)
+
+  return filtered
+})
+
 onMounted(async () => {
   if (!itemsStore.items.length) await itemsStore.refresh()
   if (!locsStore.locations.length) await locsStore.refresh(true)
@@ -150,6 +177,23 @@ watch([selUserId, asOfDate], loadSnapshot)
         />
         <input class="date" type="date" v-model="asOfDate" title="Valuation date (optional)" />
         <input class="search" v-model="q" type="search" placeholder="Search item…" />
+
+        <div class="btn-group">
+          <button
+            class="btn"
+            :class="{ active: itemsView === 'table' }"
+            @click="itemsView = 'table'"
+          >
+            Table
+          </button>
+          <button
+            class="btn"
+            :class="{ active: itemsView === 'grid' }"
+            @click="itemsView = 'grid'"
+          >
+            AE Grid
+          </button>
+        </div>
       </div>
     </div>
 
@@ -157,79 +201,87 @@ watch([selUserId, asOfDate], loadSnapshot)
     <div v-if="errorMsg" class="err">{{ errorMsg }}</div>
 
     <div class="card">
-      <div class="table">
-        <!-- Header -->
-        <div class="tr th">
-          <div class="cell exp"></div>
-          <div class="cell item">Item</div>
-          <div class="cell qty">Quantity</div>
-          <div class="cell price" v-if="asOfDate">Price</div>
-          <div class="cell value" v-if="asOfDate">Value</div>
-        </div>
+      <div v-if="loading" class="loading">Loading…</div>
 
-        <!-- Rows -->
-        <template v-if="!loading && snap">
-          <div v-for="it in viewItems" :key="it.item_id" class="group">
-            <div class="tr row">
-              <div class="cell exp">
-                <button class="iconbtn" @click="toggleItem(it.item_id)">
-                  <span class="caret" :class="{ open: isExpanded(it.item_id) }">▸</span>
-                </button>
-              </div>
-              <div class="cell item">
-                <img
-                  :src="getItemIconUrl(it.item_id, itemsStore.iconBust[it.item_id])"
-                  class="itm-icon"
-                  alt=""
-                  @error="($event.target as HTMLImageElement).style.display = 'none'"
-                />
-                {{ it.name }}
-              </div>
-              <div class="cell qty">{{ it.quantity }}</div>
-              <div class="cell price" v-if="asOfDate">{{ it.price ?? '—' }}</div>
-              <div class="cell value" v-if="asOfDate">{{ it.value ?? '—' }}</div>
+      <template v-else>
+        <!-- AE GRID VIEW -->
+        <InventoryAeGrid v-if="itemsView === 'grid'" :rows="aeSortedFiltered" />
+
+        <!-- TABLE VIEW (original UI) -->
+        <template v-else>
+          <div class="table">
+            <!-- Header -->
+            <div class="tr th">
+              <div class="cell exp"></div>
+              <div class="cell item">Item</div>
+              <div class="cell qty">Quantity</div>
+              <div class="cell price" v-if="asOfDate">Price</div>
+              <div class="cell value" v-if="asOfDate">Value</div>
             </div>
 
-            <!-- Expanded: ledger for THIS item (filtered client-side) -->
-            <div v-if="isExpanded(it.item_id)" class="expanded">
-              <div class="tr th sub">
-                <div class="cell exp"></div>
-                <div class="cell ts">Timestamp</div>
-                <div class="cell mv">Movement type</div>
-                <div class="cell delta">Δ</div>
-                <div class="cell tid">Trade</div>
-              </div>
-
-              <div v-for="ln in ledgerCache[it.item_id] || []" :key="ln.id" class="tr subrow">
-                <div class="cell exp"></div>
-                <div class="cell ts">{{ new Date(ln.timestamp).toLocaleString() }}</div>
-                <div class="cell mv">
-                  {{
-                    reasonsStore.reasons.find((r) => r.code === ln.movement_reason_code)?.name ||
-                    ln.movement_reason_code ||
-                    '—'
-                  }}
+            <!-- Rows -->
+            <template v-if="snap">
+              <div v-for="it in viewItems" :key="it.item_id" class="group">
+                <div class="tr row">
+                  <div class="cell exp">
+                    <button class="iconbtn" @click="toggleItem(it.item_id)">
+                      <span class="caret" :class="{ open: isExpanded(it.item_id) }">▸</span>
+                    </button>
+                  </div>
+                  <div class="cell item">
+                    <img
+                      :src="getItemIconUrl(it.item_id, itemsStore.iconBust[it.item_id])"
+                      class="itm-icon"
+                      alt=""
+                      @error="($event.target as HTMLImageElement).style.display = 'none'"
+                    />
+                    {{ it.name }}
+                  </div>
+                  <div class="cell qty">{{ it.quantity }}</div>
+                  <div class="cell price" v-if="asOfDate">{{ it.price ?? '—' }}</div>
+                  <div class="cell value" v-if="asOfDate">{{ it.value ?? '—' }}</div>
                 </div>
-                <div class="cell delta">
-                  <span :class="ln.delta_qty >= 0 ? 'ok' : 'warn'">{{ ln.delta_qty }}</span>
-                </div>
-                <div class="cell tid">#{{ ln.trade_id ?? '—' }}</div>
-              </div>
 
-              <div v-if="!(ledgerCache[it.item_id] || []).length" class="loading">
-                No ledger entries (or not loaded).
+                <!-- Expanded: ledger for THIS item (filtered client-side) -->
+                <div v-if="isExpanded(it.item_id)" class="expanded">
+                  <div class="tr th sub">
+                    <div class="cell exp"></div>
+                    <div class="cell ts">Timestamp</div>
+                    <div class="cell mv">Movement type</div>
+                    <div class="cell delta">Δ</div>
+                    <div class="cell tid">Trade</div>
+                  </div>
+
+                  <div v-for="ln in ledgerCache[it.item_id] || []" :key="ln.id" class="tr subrow">
+                    <div class="cell exp"></div>
+                    <div class="cell ts">{{ new Date(ln.timestamp).toLocaleString() }}</div>
+                    <div class="cell mv">
+                      {{
+                        reasonsStore.reasons.find((r) => r.code === ln.movement_reason_code)?.name ||
+                        ln.movement_reason_code ||
+                        '—'
+                      }}
+                    </div>
+                    <div class="cell delta">
+                      <span :class="ln.delta_qty >= 0 ? 'ok' : 'warn'">{{ ln.delta_qty }}</span>
+                    </div>
+                    <div class="cell tid">#{{ ln.trade_id ?? '—' }}</div>
+                  </div>
+
+                  <div v-if="!(ledgerCache[it.item_id] || []).length" class="loading">
+                    No ledger entries (or not loaded).
+                  </div>
+                </div>
               </div>
-            </div>
+            </template>
+          </div>
+
+          <div v-if="asOfDate && snap" class="total">
+            <span>Total value @ {{ asOfDate }}:</span>
+            <strong>{{ snap.total_value ?? '—' }}</strong>
           </div>
         </template>
-
-        <div v-if="loading" class="loading">Loading…</div>
-      </div>
-
-      <div v-if="asOfDate && snap" class="total">
-        <span>Total value @ {{ asOfDate }}:</span>
-        <strong>{{ snap.total_value ?? '—' }}</strong>
-      </div>
+      </template>
     </div>
   </div>
 </template>
@@ -358,5 +410,27 @@ watch([selUserId, asOfDate], loadSnapshot)
   display: flex;
   gap: 8px;
   align-items: baseline;
+}
+
+.btn-group {
+  display: inline-flex;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.btn-group .btn {
+  padding: 8px 12px;
+  border: 0;
+  border-right: 1px solid var(--border-subtle);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.btn-group .btn:last-child {
+  border-right: 0;
+}
+.btn-group .btn.active {
+  background: var(--accent);
+  color: var(--bg-primary);
 }
 </style>

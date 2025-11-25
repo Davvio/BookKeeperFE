@@ -24,7 +24,10 @@ export const useAuth = defineStore('auth', {
     token: '' as string,
     structure_id: '' as string,
     user_id: null as number | null,
-    username: '' as string,
+    username: '' as string,  // Minecraft username
+    mc_uuid: '' as string,
+    has_password: false as boolean,
+    membership_status: 'unassigned' as string, // unassigned, guest, member
     role_codes: [] as string[],
     permissions: {} as Permissions,
     loading: false as boolean,
@@ -37,7 +40,22 @@ export const useAuth = defineStore('auth', {
       const exp = this.expiresAtMs
       return exp !== null && Date.now() + SKEW_MS >= exp
     },
-    isAdmin: (s) => s.role_codes?.includes('admin') || !!s.permissions?.['users.admin'],
+    isAdmin: (s) => {
+      // Check for ADMIN or OWNER role (case-insensitive) or users.admin permission
+      const hasAdminRole = s.role_codes?.some(role =>
+        role.toUpperCase() === 'ADMIN' || role.toUpperCase() === 'OWNER'
+      )
+      return hasAdminRole || !!s.permissions?.['users.admin']
+    },
+
+    /** Check if user is a full member (not guest or unassigned) */
+    isMember: (s) => s.membership_status === 'member',
+
+    /** Check if user is a guest (pending approval) */
+    isGuest: (s) => s.membership_status === 'guest',
+
+    /** Check if user is unassigned (no structure) */
+    isUnassigned: (s) => s.membership_status === 'unassigned' || !s.structure_id,
 
     /** First role (fallback 'EMPLOYEE') for chips/labels */
     primaryRole: (s) => s.role_codes?.[0] || 'EMPLOYEE',
@@ -68,6 +86,9 @@ export const useAuth = defineStore('auth', {
         this.structure_id = saved.structure_id || ''
         this.user_id = typeof saved.user_id === 'number' ? saved.user_id : null
         this.username = saved.username || ''
+        this.mc_uuid = saved.mc_uuid || ''
+        this.has_password = saved.has_password || false
+        this.membership_status = saved.membership_status || 'unassigned'
         this.role_codes = saved.role_codes || []
         this.permissions = saved.permissions || {}
         setAuth(this.token || null)
@@ -85,6 +106,9 @@ export const useAuth = defineStore('auth', {
           structure_id: this.structure_id,
           user_id: this.user_id,
           username: this.username,
+          mc_uuid: this.mc_uuid,
+          has_password: this.has_password,
+          membership_status: this.membership_status,
           role_codes: this.role_codes,
           permissions: this.permissions,
         }),
@@ -97,6 +121,9 @@ export const useAuth = defineStore('auth', {
       structure_id: string
       user_id: number
       username: string
+      mc_uuid?: string
+      has_password?: boolean
+      membership_status?: string
       role_codes?: string[]
       permissions?: Permissions
     }) {
@@ -104,6 +131,9 @@ export const useAuth = defineStore('auth', {
       this.structure_id = payload.structure_id
       this.user_id = payload.user_id
       this.username = payload.username
+      this.mc_uuid = payload.mc_uuid || ''
+      this.has_password = payload.has_password ?? false
+      this.membership_status = payload.membership_status || 'unassigned'
       this.role_codes = payload.role_codes || []
       this.permissions = payload.permissions || {}
       setAuth(this.token)
@@ -115,14 +145,25 @@ export const useAuth = defineStore('auth', {
     async login(username: string, password: string) {
       this.loading = true
       try {
-        const res = await api.post('/auth/login', { username, password })
+        const { login: loginApi } = await import('@/services/authApi')
+        const res = await loginApi(username, password)
+
+        // Build permissions map from user roles
+        const permissions: Permissions = {}
+        res.user.roles.forEach((role) => {
+          permissions[role.toLowerCase()] = true
+        })
+
         this.applyLogin({
-          access_token: res.data.access_token,
-          structure_id: res.data.structure_id,
-          user_id: res.data.user_id,
-          username: res.data.username,
-          role_codes: res.data.role_codes || [],
-          permissions: res.data.permissions || {},
+          access_token: res.access_token,
+          structure_id: res.user.structureId || '',
+          user_id: res.user.userId,
+          username: res.user.username,
+          mc_uuid: res.user.mcUuid,
+          has_password: res.user.hasPassword,
+          membership_status: res.user.membershipStatus || 'unassigned',
+          role_codes: res.user.roles,
+          permissions,
         })
       } finally {
         this.loading = false
@@ -161,6 +202,9 @@ export const useAuth = defineStore('auth', {
       this.structure_id = ''
       this.user_id = null
       this.username = ''
+      this.mc_uuid = ''
+      this.has_password = false
+      this.membership_status = 'unassigned'
       this.role_codes = []
       this.permissions = {}
       localStorage.removeItem(STORAGE_KEY)
@@ -168,6 +212,52 @@ export const useAuth = defineStore('auth', {
       if (this._expiryTimer) {
         window.clearTimeout(this._expiryTimer)
         this._expiryTimer = null
+      }
+    },
+
+    /** Magic link login - exchange token for JWT */
+    async magicLogin(token: string): Promise<{ hasPassword: boolean }> {
+      this.loading = true
+      try {
+        const { magicLogin: magicLoginApi } = await import('@/services/authApi')
+        const res = await magicLoginApi(token)
+
+        // Build permissions map from user roles
+        const permissions: Permissions = {}
+        res.user.roles.forEach((role) => {
+          permissions[role.toLowerCase()] = true
+        })
+
+        this.applyLogin({
+          access_token: res.access_token,
+          structure_id: res.user.structureId || '',
+          user_id: res.user.userId,
+          username: res.user.username,
+          mc_uuid: res.user.mcUuid,
+          has_password: res.user.hasPassword,
+          membership_status: res.user.membershipStatus || 'unassigned',
+          role_codes: res.user.roles,
+          permissions,
+        })
+
+        return { hasPassword: res.user.hasPassword }
+      } finally {
+        this.loading = false
+      }
+    },
+
+    /** Set password for current user */
+    async setPassword(password: string) {
+      this.loading = true
+      try {
+        const { setPassword: setPasswordApi } = await import('@/services/authApi')
+        await setPasswordApi(password)
+
+        // Update has_password flag
+        this.has_password = true
+        this._persist()
+      } finally {
+        this.loading = false
       }
     },
 

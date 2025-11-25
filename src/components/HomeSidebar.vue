@@ -18,6 +18,7 @@ const primaryNavAll: NavItem[] = [
   { to: '/trades', label: 'All Entries' },
   { to: '/create-trade', label: 'Create Entry', gated: true },
   { to: '/comms', label: 'Communications' },
+  { to: '/nations', label: 'Nations' },
   { to: '/inventory', label: 'Inventory', gated: true },
 ]
 

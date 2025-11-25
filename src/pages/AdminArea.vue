@@ -26,17 +26,20 @@ const isAdmin = computed(() => {
         <RouterLink to="/admin/users-roles" class="px-3 py-2 rounded hover:bg-[var(--bg-tertiary)]"
           >Users & Roles</RouterLink
         >
+        <RouterLink to="/admin/player-management" class="px-3 py-2 rounded hover:bg-[var(--bg-tertiary)]"
+          >Player Management</RouterLink
+        >
         <RouterLink to="/admin/structure" class="px-3 py-2 rounded hover:bg-[var(--bg-tertiary)]"
           >Structure Settings</RouterLink
+        >
+        <RouterLink to="/admin/structure-codes" class="px-3 py-2 rounded hover:bg-[var(--bg-tertiary)]"
+          >Join Codes</RouterLink
         >
         <RouterLink
           to="/admin/movement-reasons"
           class="px-3 py-2 rounded hover:bg-[var(--bg-tertiary)]"
           >Movement Reasons</RouterLink
         >
-        <!-- <RouterLink to="/admin/policies" class="px-3 py-2 rounded hover:bg-[var(--bg-tertiary)]"
-          >Message Policies</RouterLink
-        > -->
       </nav>
       <div v-if="!isAdmin" class="mt-3 text-xs text-red-400">You don’t have admin permissions.</div>
     </aside>
