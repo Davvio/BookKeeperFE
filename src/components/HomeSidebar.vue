@@ -11,20 +11,16 @@ const auth = useAuth()
 // Rehydrate once per app start (mirrors index.ts guard)
 if (!auth.token) auth.initFromStorage?.()
 
-type NavItem = { to: string; label: string; gated?: boolean }
+type NavItem = { to: string; label: string }
 
-const primaryNavAll: NavItem[] = [
+const primaryNav: NavItem[] = [
   { to: '/', label: 'Dashboard' },
-  { to: '/trades', label: 'All Entries' },
-  { to: '/create-trade', label: 'Create Entry', gated: true },
+  { to: '/trades', label: 'Trades' },
+  { to: '/create-trade', label: 'Create Entry' },
   { to: '/comms', label: 'Communications' },
   { to: '/nations', label: 'Nations' },
-  { to: '/inventory', label: 'Inventory', gated: true },
+  { to: '/inventory', label: 'Inventory' },
 ]
-
-const primaryNav = computed(() =>
-  primaryNavAll.filter((i) => !i.gated || canCreateEntry.value).map(({ gated, ...rest }) => rest),
-)
 
 const dataNav: NavItem[] = [
   { to: '/items', label: 'Items' },
@@ -33,9 +29,6 @@ const dataNav: NavItem[] = [
 ]
 
 const adminNav: NavItem[] = [{ to: '/admin', label: 'Admin Area' }]
-
-// flat list if you really want it, but we'll render grouped below
-const nav = computed(() => [...primaryNav.value, ...dataNav])
 
 function isActive(path: string) {
   // Exact for most, prefix for /admin (so /admin/users-roles highlights)
@@ -48,18 +41,6 @@ async function logout() {
   const redirect = encodeURIComponent(route.fullPath)
   router.replace(`/login?redirect=${redirect}`)
 }
-
-function hasPerm(key: string) {
-  try {
-    const json = JSON.parse(atob((auth.token || '').split('.')[1] || '')) || {}
-    return !!json.permissions?.[key]
-  } catch {
-    return false
-  }
-}
-const canCreateEntry = computed(
-  () => auth.hasRole?.('ADMIN') || auth.hasRole?.('QUARTERMASTER') || hasPerm('inventory.admin'),
-)
 </script>
 
 <template>
@@ -109,7 +90,7 @@ const canCreateEntry = computed(
     </div>
 
     <!-- Admin -->
-    <div v-if="auth.isAdmin" class="mb-3">
+    <div class="mb-3">
       <div class="px-3 pb-1 text-xs uppercase tracking-wide opacity-60">Admin</div>
       <nav class="flex flex-col gap-2">
         <RouterLink
@@ -134,15 +115,8 @@ const canCreateEntry = computed(
         <div class="text-[var(--text-primary)] font-medium">
           {{ auth.username || 'User' }}
         </div>
-
-        <!-- Role chips -->
-        <div class="mt-1 flex flex-wrap gap-1">
-          <span v-for="code in auth.role_codes" :key="code" class="role-chip" :title="code">
-            {{ code }}
-          </span>
-          <span v-if="auth.role_codes?.length === 0" class="text-xs capitalize">
-            {{ (auth.primaryRole || 'EMPLOYEE').toLowerCase() }}
-          </span>
+        <div class="mt-1 text-xs text-[var(--text-muted)]">
+          {{ auth.structure_id || 'No Structure' }}
         </div>
       </div>
 
@@ -158,12 +132,4 @@ const canCreateEntry = computed(
 </template>
 
 <style scoped>
-.role-chip {
-  font-size: 0.7rem;
-  padding: 2px 6px;
-  border-radius: 999px;
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-  border: 1px solid var(--bg-tertiary);
-}
 </style>

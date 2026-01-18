@@ -28,8 +28,6 @@ export const useAuth = defineStore('auth', {
     mc_uuid: '' as string,
     has_password: false as boolean,
     membership_status: 'unassigned' as string, // unassigned, guest, member
-    role_codes: [] as string[],
-    permissions: {} as Permissions,
     loading: false as boolean,
     _expiryTimer: null as number | null,
   }),
@@ -40,13 +38,7 @@ export const useAuth = defineStore('auth', {
       const exp = this.expiresAtMs
       return exp !== null && Date.now() + SKEW_MS >= exp
     },
-    isAdmin: (s) => {
-      // Check for ADMIN or OWNER role (case-insensitive) or users.admin permission
-      const hasAdminRole = s.role_codes?.some(role =>
-        role.toUpperCase() === 'ADMIN' || role.toUpperCase() === 'OWNER'
-      )
-      return hasAdminRole || !!s.permissions?.['users.admin']
-    },
+    hasStructure: (s) => !!s.structure_id,
 
     /** Check if user is a full member (not guest or unassigned) */
     isMember: (s) => s.membership_status === 'member',
@@ -56,19 +48,6 @@ export const useAuth = defineStore('auth', {
 
     /** Check if user is unassigned (no structure) */
     isUnassigned: (s) => s.membership_status === 'unassigned' || !s.structure_id,
-
-    /** First role (fallback 'EMPLOYEE') for chips/labels */
-    primaryRole: (s) => s.role_codes?.[0] || 'EMPLOYEE',
-
-    /** Check a permission key, e.g. auth.can('users.admin') */
-    can: (s) => (perm: string) => !!s.permissions?.[perm],
-
-    /** Check a role code (case-insensitive), e.g. auth.hasRole('GUILDMASTER') */
-    hasRole: (s) => (code: string) => {
-      if (!code) return false
-      const tgt = code.toUpperCase()
-      return (s.role_codes || []).some((c) => String(c).toUpperCase() === tgt)
-    },
   },
   actions: {
     /** Legacy alias so existing code can call auth.init() */
@@ -89,8 +68,6 @@ export const useAuth = defineStore('auth', {
         this.mc_uuid = saved.mc_uuid || ''
         this.has_password = saved.has_password || false
         this.membership_status = saved.membership_status || 'unassigned'
-        this.role_codes = saved.role_codes || []
-        this.permissions = saved.permissions || {}
         setAuth(this.token || null)
         this._scheduleExpiryWatcher()
       } catch {
@@ -109,8 +86,6 @@ export const useAuth = defineStore('auth', {
           mc_uuid: this.mc_uuid,
           has_password: this.has_password,
           membership_status: this.membership_status,
-          role_codes: this.role_codes,
-          permissions: this.permissions,
         }),
       )
     },
@@ -124,8 +99,6 @@ export const useAuth = defineStore('auth', {
       mc_uuid?: string
       has_password?: boolean
       membership_status?: string
-      role_codes?: string[]
-      permissions?: Permissions
     }) {
       this.token = payload.access_token
       this.structure_id = payload.structure_id
@@ -134,8 +107,6 @@ export const useAuth = defineStore('auth', {
       this.mc_uuid = payload.mc_uuid || ''
       this.has_password = payload.has_password ?? false
       this.membership_status = payload.membership_status || 'unassigned'
-      this.role_codes = payload.role_codes || []
-      this.permissions = payload.permissions || {}
       setAuth(this.token)
       this._persist()
       this._scheduleExpiryWatcher()
@@ -148,12 +119,6 @@ export const useAuth = defineStore('auth', {
         const { login: loginApi } = await import('@/services/authApi')
         const res = await loginApi(username, password)
 
-        // Build permissions map from user roles
-        const permissions: Permissions = {}
-        res.user.roles.forEach((role) => {
-          permissions[role.toLowerCase()] = true
-        })
-
         this.applyLogin({
           access_token: res.access_token,
           structure_id: res.user.structureId || '',
@@ -162,8 +127,6 @@ export const useAuth = defineStore('auth', {
           mc_uuid: res.user.mcUuid,
           has_password: res.user.hasPassword,
           membership_status: res.user.membershipStatus || 'unassigned',
-          role_codes: res.user.roles,
-          permissions,
         })
       } finally {
         this.loading = false
@@ -180,8 +143,7 @@ export const useAuth = defineStore('auth', {
           structure_id: res.data.structure_id,
           user_id: res.data.user_id,
           username: res.data.username,
-          role_codes: res.data.role_codes || [],
-          permissions: res.data.permissions || {},
+          membership_status: res.data.membership_status || 'unassigned',
         })
       } finally {
         this.loading = false
@@ -205,8 +167,6 @@ export const useAuth = defineStore('auth', {
       this.mc_uuid = ''
       this.has_password = false
       this.membership_status = 'unassigned'
-      this.role_codes = []
-      this.permissions = {}
       localStorage.removeItem(STORAGE_KEY)
       setAuth(null)
       if (this._expiryTimer) {
@@ -222,12 +182,6 @@ export const useAuth = defineStore('auth', {
         const { magicLogin: magicLoginApi } = await import('@/services/authApi')
         const res = await magicLoginApi(token)
 
-        // Build permissions map from user roles
-        const permissions: Permissions = {}
-        res.user.roles.forEach((role) => {
-          permissions[role.toLowerCase()] = true
-        })
-
         this.applyLogin({
           access_token: res.access_token,
           structure_id: res.user.structureId || '',
@@ -236,8 +190,6 @@ export const useAuth = defineStore('auth', {
           mc_uuid: res.user.mcUuid,
           has_password: res.user.hasPassword,
           membership_status: res.user.membershipStatus || 'unassigned',
-          role_codes: res.user.roles,
-          permissions,
         })
 
         return { hasPassword: res.user.hasPassword }

@@ -17,15 +17,7 @@ import type { Item } from '@/services/itemsApi'
 import type { Location } from '@/services/locationsApi'
 
 const auth = useAuth()
-function hasPerm(key: string) {
-  try {
-    const json = JSON.parse(atob((auth.token || '').split('.')[1] || '')) || {}
-    return !!json.permissions?.[key]
-  } catch {
-    return false
-  }
-}
-const scopeLabel = computed(() => (hasPerm('trades.view_all') ? 'All' : 'All your entries'))
+const scopeLabel = 'All Trades'
 
 const router = useRouter()
 const itemsStore = useItemsStore()
@@ -37,13 +29,6 @@ const errorMsg = ref('')
 const trades = ref<TradeOut[]>([])
 const expanded = ref<Set<number>>(new Set())
 const q = ref('') // search text
-
-const isAdmin = computed(() =>
-  Boolean(
-    (auth as any)?.permissions?.['users.admin'] ||
-      (auth as any)?.user?.permissions?.['users.admin'],
-  ),
-)
 
 /* -------------------- Filters -------------------- */
 const dateFrom = ref<string>('') // YYYY-MM-DD
@@ -141,7 +126,6 @@ function userInitial(name?: string) {
 
 /* -------------------- Delete line -------------------- */
 async function removeLine(t: TradeOut, ln: TradeLineOut & { direction: 'GAINED' | 'GIVEN' }) {
-  if (!isAdmin.value) return
   if (!confirm(`Delete this line: ${ln.direction} ${ln.quantity} × ${itemName(ln.item_id)} ?`))
     return
 
@@ -393,7 +377,7 @@ function duplicateTrade(t: TradeOut) {
                 <div class="cell from">From (line)</div>
                 <div class="cell to">To (line)</div>
                 <div class="cell profit"></div>
-                <div class="cell act" v-if="isAdmin">Actions</div>
+                <div class="cell act">Actions</div>
               </div>
 
               <div class="tr subrow" v-for="(ln, idx) in mergedLines(t)" :key="idx">
@@ -431,7 +415,7 @@ function duplicateTrade(t: TradeOut) {
 
                 <div class="cell profit"></div>
 
-                <div class="cell act" v-if="isAdmin">
+                <div class="cell act">
                   <button class="btn danger" @click.stop="removeLine(t, ln)">Delete</button>
                 </div>
               </div>

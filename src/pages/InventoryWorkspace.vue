@@ -11,23 +11,6 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuth()
 
-// ----- Access (role-first, perms fallback)
-function hasPerm(k: string) {
-  try {
-    const json = JSON.parse(atob((auth.token || '').split('.')[1] || '')) || {}
-    return !!json.permissions?.[k]
-  } catch {
-    return false
-  }
-}
-const isAllowed = computed(
-  () =>
-    auth.hasRole?.('ADMIN') ||
-    auth.hasRole?.('QUARTERMASTER') ||
-    hasPerm('inventory.admin') ||
-    hasPerm('inventory.view'),
-)
-
 // ----- Tabs
 type TabKey = 'inv' | 'players'
 const tab = ref<TabKey>((route.query.tab as TabKey) || 'inv')
@@ -61,13 +44,7 @@ onMounted(() => {
       </div>
     </div>
 
-    <div v-if="!isAllowed" class="card">
-      <div class="text-sm opacity-80">
-        You don’t have access to this workspace. (Quartermasters and Admins only)
-      </div>
-    </div>
-
-    <div v-else>
+    <div>
       <div v-show="tab === 'inv'">
         <!-- Your current Inventory page already has its own internal tabs (By Item/By Location) -->
         <Inventory />

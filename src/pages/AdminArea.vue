@@ -3,18 +3,6 @@
 <!-- eslint-disable vue/multi-word-component-names -->
 <!-- src/pages/admin/AdminArea.vue -->
 <script setup lang="ts">
-import { computed } from 'vue'
-import { useAuth } from '@/stores/auth'
-
-const auth = useAuth()
-const isAdmin = computed(() => {
-  try {
-    const json = JSON.parse(atob((auth.token || '').split('.')[1] || '')) || {}
-    return !!(json.permissions && json.permissions['users.admin'])
-  } catch {
-    return false
-  }
-})
 </script>
 
 <template>
@@ -41,7 +29,6 @@ const isAdmin = computed(() => {
           >Movement Reasons</RouterLink
         >
       </nav>
-      <div v-if="!isAdmin" class="mt-3 text-xs text-red-400">You don’t have admin permissions.</div>
     </aside>
 
     <!-- content -->

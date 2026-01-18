@@ -57,7 +57,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'admin',
         component: () => import('@/pages/AdminArea.vue'),
-        meta: { requiresAdmin: true },
+        meta: { requiresAuth: true },
         children: [
           { path: '', redirect: '/admin/users-roles' },
           { path: 'users-roles', component: () => import('@/pages/AdminUsersRoles.vue') },
@@ -99,34 +99,12 @@ router.beforeEach((to, from, next) => {
   // Rehydrate once per app start (safe in guard)
   if (!auth.token) auth.initFromStorage()
 
-  const needsAuth = to.meta?.requiresAuth || to.meta?.requiresAdmin
-  const needsAdmin = to.meta?.requiresAdmin
+  const needsAuth = to.meta?.requiresAuth
 
-  // Check authentication
+  // Check authentication only
   if (needsAuth && (!auth.isAuthenticated || auth.isExpired)) {
     const redirect = encodeURIComponent(to.fullPath)
     return next({ path: '/login', query: { redirect } })
-  }
-
-  // Check admin permissions
-  if (needsAdmin && !auth.isAdmin) {
-    return next({ path: '/' })
-  }
-
-  // Guest users can only access account settings, join structure, and nations page
-  // Block structure-specific pages for guests
-  const allowedPathsForGuests = [
-    '/login',
-    '/magic-login',
-    '/join-structure',
-    '/nations',
-    '/profile', // If you add a profile page later
-  ]
-  const isAllowedPathForGuest = allowedPathsForGuests.some(p => to.path.startsWith(p))
-
-  if (auth.isAuthenticated && auth.isGuest && !isAllowedPathForGuest) {
-    // Redirect guests to nations page to choose/wait for approval
-    return next({ path: '/nations' })
   }
 
   next()
